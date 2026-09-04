@@ -8,6 +8,8 @@ bin/cookies.txt
 downloads/
 logs/
 .opencode
+graphify-out
+.coverage
 
 # Media
 *.mp4
