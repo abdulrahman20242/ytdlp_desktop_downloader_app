@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "ui": {
+    "theme": "dark",
+    "language": "ar",
+    "window_width": 800,
+    "window_height": 600
+  },
+  "download": {
+    "default_dir": "F:/Project/Python Projects/yt-dlp/ytdlp_desktop_downloader_app/downloads",
+    "default_quality": "720p",
+    "default_mode": "video",
+    "concurrent_fragments": 4,
+    "retries": 10,
+    "merge_output_format": "mp4",
+    "embed_thumbnail": false,
+    "embed_metadata": true,
+    "write_subs": false,
+    "sub_langs": "ar,en"
+  },
+  "audio": {
+    "default_format": "mp3",
+    "mp3_quality": "192",
+    "embed_thumbnail": true
+  },
+  "cookies": {
+    "source": "none",
+    "browser": "chrome",
+    "file_path": "data/cookies.txt"
+  },
+  "advanced": {
+    "ffmpeg_location": "bin",
+    "js_runtime": "node",
+    "node_path": "bin/node.exe",
+    "use_nightly_yt_dlp": true,
+    "show_debug_logs": false,
+    "sponsorblock_remove": false,
+    "sponsorblock_categories": [
+      "sponsor"
+    ]
+  }
+}

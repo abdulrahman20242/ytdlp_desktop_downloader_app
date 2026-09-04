@@ -1,0 +1,13 @@
+# Python & Virtual Env
+__pycache__/
+venv/
+.venv/
+
+# Project Files
+bin/cookies.txt
+downloads/
+logs/
+
+# Media
+*.mp4
+*.webm
