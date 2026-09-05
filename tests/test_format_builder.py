@@ -17,6 +17,13 @@ def test_quality_options_are_prescribed_order():
     assert QUALITY_OPTIONS == ["Best", "2160p", "1440p", "1080p", "720p", "480p", "360p"]
 
 
+def test_format_maps_expose_best_alias():
+    # Fixed: FORMAT_MAP/FORMAT_MAP_MP4 previously only had lowercase keys, so
+    # direct indexing with the UI's "Best" label raised KeyError.
+    assert FORMAT_MAP["Best"] == FORMAT_MAP["best"]
+    assert FORMAT_MAP_MP4["Best"] == FORMAT_MAP_MP4["best"]
+
+
 def test_mode_options_cover_all_supported():
     assert MODE_OPTIONS == ["video", "mp4_only", "audio"]
 
@@ -161,7 +168,7 @@ def test_get_common_opts_defaults_when_config_missing(bin_dir):
 
 def test_get_common_opts_keep_silent_and_quiet_flags(bin_dir):
     opts = get_common_opts(str(bin_dir), _FakeConfig({}))
-    assert opts["quiet"] is True
+    assert opts["quiet"] is False
     assert opts["no_warnings"] is True
     assert opts["ignoreerrors"] is False
     assert opts["throttledratelimit"] == 102400

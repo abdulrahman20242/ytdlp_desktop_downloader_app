@@ -19,6 +19,12 @@ def extract_info(url: str) -> dict | None:
 
 
 def get_available_qualities(url: str) -> list[str]:
+    """Return 'Best' plus preset tiers at or below the video's max height.
+
+    Each tier is a height *threshold*, not an exact resolution: a 1080p video
+    yields Best, 1080p, 720p, ... and never 1440p/2160p, because no format
+    reaches those heights.
+    """
     info = extract_info(url)
     if not info:
         return ["Best"]
@@ -34,16 +40,16 @@ def get_available_qualities(url: str) -> list[str]:
 
 
 def extract_thumbnail(info: dict) -> str | None:
-    return info.get("thumbnail")
+    return info.get("thumbnail") or None
 
 
 def extract_title(info: dict) -> str:
-    return info.get("title", "")
+    return info.get("title") or ""
 
 
 def extract_duration(info: dict) -> int:
-    return info.get("duration", 0)
+    return info.get("duration") or 0
 
 
 def extract_uploader(info: dict) -> str:
-    return info.get("uploader", "")
+    return info.get("uploader") or ""

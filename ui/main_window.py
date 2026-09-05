@@ -12,7 +12,7 @@ from ui.quality_selector import QualitySelector
 from ui.settings_dialog import SettingsDialog
 from core.download_controller import DownloadController
 from core.format_builder import build_format_opts, get_common_opts
-from core.info_extractor import extract_info, get_available_qualities, extract_thumbnail, extract_title
+from core.info_extractor import extract_info, get_available_qualities, extract_thumbnail, extract_title, extract_duration, extract_uploader
 from utils.validators import is_valid_youtube_url
 from utils.file_utils import open_folder
 
@@ -34,6 +34,7 @@ class MainWindow(ctk.CTkFrame):
         self._build_ui()
         self._setup_callbacks()
         self._load_config_state()
+        self.master.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_ui(self):
         header = ctk.CTkLabel(
@@ -202,9 +203,9 @@ class MainWindow(ctk.CTkFrame):
         title = extract_title(info)
         self._title_label.configure(text=f"🎬 {title}")
 
-        duration = info.get("duration", 0)
+        duration = extract_duration(info)
         mins, secs = divmod(duration, 60)
-        uploader = info.get("uploader", "غير معروف")
+        uploader = extract_uploader(info) or "غير معروف"
         self._info_label.configure(
             text=f"القناة: {uploader}\nالمدة: {mins}:{secs:02d}"
         )
@@ -240,6 +241,14 @@ class MainWindow(ctk.CTkFrame):
         )
         if path:
             self._dir_var.set(path)
+            self.config.set("download.default_dir", path)
+
+    def _on_close(self):
+        current = self._dir_var.get().strip()
+        saved = self.config.get("download.default_dir", "")
+        if current and current != saved:
+            self.config.set("download.default_dir", current)
+        self.master.destroy()
 
     def _start_download(self):
         url = self._url_var.get().strip()

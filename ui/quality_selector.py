@@ -28,7 +28,6 @@ class QualitySelector(ctk.CTkFrame):
         self._quality_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
 
     def _on_mode_change(self, mode: str):
-        from core.format_builder import FORMAT_MAP
         if mode == "audio":
             self._quality_menu.configure(values=["MP3", "M4A"])
             if self._quality_var.get() not in ("MP3", "M4A"):

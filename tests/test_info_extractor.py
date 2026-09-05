@@ -79,6 +79,7 @@ def test_get_available_qualities_falls_back_to_best_on_error(monkeypatch):
     ("info", "expected"),
     [
         ({"thumbnail": "http://img/x.jpg"}, "http://img/x.jpg"),
+        ({"thumbnail": None}, None),
         ({}, None),
     ],
 )
@@ -90,6 +91,7 @@ def test_extract_thumbnail(info, expected):
     ("info", "expected"),
     [
         ({"title": "My Video"}, "My Video"),
+        ({"title": None}, ""),
         ({}, ""),
     ],
 )
@@ -101,6 +103,7 @@ def test_extract_title(info, expected):
     ("info", "expected"),
     [
         ({"duration": 125}, 125),
+        ({"duration": None}, 0),
         ({}, 0),
     ],
 )
@@ -112,6 +115,7 @@ def test_extract_duration(info, expected):
     ("info", "expected"),
     [
         ({"uploader": "Channel Name"}, "Channel Name"),
+        ({"uploader": None}, ""),
         ({}, ""),
     ],
 )

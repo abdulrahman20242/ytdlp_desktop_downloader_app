@@ -3,23 +3,47 @@ import threading
 from pathlib import Path
 
 import pytest
-from yt_dlp.utils import DownloadError, ExtractorError, UnsupportedError
 
-from core.download_controller import DownloadController
+from core.download_controller import (
+    DownloadController,
+    _build_argv,
+    _classify_error,
+    _parse_destination,
+    _parse_progress,
+    _strip_ytdlp_report_suffix,
+)
 
 
-class _FakeYDL:
-    def __init__(self, opts):
-        self.opts = opts
+class _FakeProc:
+    def __init__(self, lines, rc=0):
+        self.lines = list(lines)
+        self.stdout = iter(self.lines)
+        self.rc = rc
+        self.terminated = False
 
-    def __enter__(self):
-        return self
+    def poll(self):
+        return self.rc
 
-    def __exit__(self, *exc):
-        return False
+    def wait(self):
+        return self.rc
 
-    def download(self, urls):
-        raise NotImplementedError
+    def terminate(self):
+        self.terminated = True
+
+
+class _BlockingProc(_FakeProc):
+    def __init__(self, lines, started, release, rc=0):
+        self.lines = list(lines)
+        self.rc = rc
+        self.terminated = False
+        self._started = started
+        self._release = release
+
+    @property
+    def stdout(self):
+        self._started.set()
+        self._release.wait(timeout=5)
+        return iter(self.lines)
 
 
 class _FakeApp:
@@ -41,9 +65,18 @@ def _bare_controller():
     c._thread = None
     c._stop_event = threading.Event()
     c._after_id = None
+    c._proc = None
     c._app = None
     c._callbacks = {}
     return c
+
+
+def _worker_with_stdout(monkeypatch, lines, rc=0, opts=None):
+    dt = _bare_controller()
+    proc = _FakeProc(lines, rc=rc)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: proc)
+    dt._download_worker("https://youtu.be/x", opts or {"format": "best"}, Path("."))
+    return dt, proc
 
 
 def _drain(q):
@@ -56,19 +89,11 @@ def _drain(q):
 
 
 def test_start_download_spawns_thread_and_schedules_after(tmp_path, monkeypatch):
-    import core.download_controller as dc
-
     release = threading.Event()
     started = threading.Event()
 
-    class BlockingYDL(_FakeYDL):
-        def __init__(self, opts=None):
-            super().__init__(opts or {})
-            started.set()
-            release.wait(timeout=5)
-
-        def download(self, urls):
-            release.wait(timeout=5)
+    proc = _BlockingProc([], started, release, rc=0)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: proc)
 
     fake_app = _FakeApp()
     c = DownloadController(config=None)
@@ -76,116 +101,276 @@ def test_start_download_spawns_thread_and_schedules_after(tmp_path, monkeypatch)
     c._queue = queue.Queue()
     c._thread = None
 
-    monkeypatch.setattr(dc, "YoutubeDL", lambda opts=None, **k: BlockingYDL(opts))
     c.start_download("https://youtu.be/x", {"format": "best"}, tmp_path)
-    assert started.wait(timeout=5)  # worker thread actually entered YDL
+    assert started.wait(timeout=5)  # worker thread actually spawned the exe
     assert c.is_downloading() is True
     assert any(delay == 100 for delay, _ in fake_app._after_called)
     release.set()
+    if c._thread:
+        c._thread.join(timeout=1)
 
 
 def test_download_worker_success_pushes_done(monkeypatch):
-    import core.download_controller as dc
-
-    class OkYDL(_FakeYDL):
-        def download(self, urls):
-            pass
-
-    monkeypatch.setattr(dc, "YoutubeDL", lambda opts=None, **k: OkYDL(opts or {}))
-    dt = _bare_controller()
-    dt._download_worker("https://youtu.be/x", {"format": "best"}, Path("."))
+    lines = [
+        "[info] wRuQPV8Q4jc: Downloading 1 format(s): 394+251",
+        "[download] Destination: out\\Graphify [wRuQPV8Q4jc].webm",
+        "[download] 100% of 20.60MiB in 00:15",
+    ]
+    dt, _ = _worker_with_stdout(monkeypatch, lines, rc=0)
     events = _drain(dt._queue)
     assert ("done", None) in events
+    assert any(e == "log" and "[info]" in d for e, d in events)
 
 
 @pytest.mark.parametrize(
-    ("exc", "expected_prefix"),
+    ("error_line", "expected"),
     [
-        (DownloadError("Sign in to confirm"), "age_restricted"),
-        (DownloadError("This video is age restricted"), "age_restricted"),
-        (DownloadError("Video unavailable"), "unavailable"),
-        (DownloadError("HTTP Error 429"), "rate_limited"),
-        (DownloadError("Could not copy cookie jar"), "فشل استخراج cookies من المتصفح — أغلق المتصفح أو استخدم ملف cookies في الإعدادات"),
-        (DownloadError("some other failure"), "download_error:some other failure"),
-        (RuntimeError("boom"), "unknown:boom"),
+        ("ERROR: Sign in to confirm you're not a bot. This is to protect our users", "age_restricted"),
+        ("ERROR: This video is only available to users aged 18+", "age_restricted"),
+        ("ERROR: Video unavailable. This video is private.", "unavailable"),
+        ("ERROR: HTTP Error 429: Too Many Requests (caused by ...)", "rate_limited"),
+        (
+            "ERROR: Could not copy cookie jar",
+            "فشل استخراج cookies من المتصفح — أغلق المتصفح أو استخدم ملف cookies في الإعدادات",
+        ),
+        ("ERROR: Unsupported URL: https://example.com", "unsupported_url"),
+        ("ERROR: some other failure", "download_error:some other failure"),
     ],
 )
-def test_download_worker_classifies_errors(monkeypatch, exc, expected_prefix):
-    import core.download_controller as dc
+def test_download_worker_classifies_errors(monkeypatch, error_line, expected):
+    dt, _ = _worker_with_stdout(monkeypatch, [error_line], rc=1)
+    events = _drain(dt._queue)
+    errors = [data for event, data in events if event == "error"]
+    assert errors == [expected]
 
-    class BoomYDL(_FakeYDL):
-        def download(self, urls):
-            raise exc
 
-    monkeypatch.setattr(dc, "YoutubeDL", lambda opts=None, **k: BoomYDL(opts or {}))
-    dt = _bare_controller()
-    dt._download_worker("https://youtu.be/x", {"format": "best"}, Path("."))
+def test_extractor_error_message_strips_ytdlp_boilerplate_suffix(monkeypatch):
+    line = (
+        "ERROR: [youtube] wRuQPV8Q4jc: extractor blew up; please report this issue. "
+        "Ensure you're using the latest version..."
+    )
+    dt, _ = _worker_with_stdout(monkeypatch, [line], rc=1)
     events = _drain(dt._queue)
     errors = [data for event, data in events if event == "error"]
     assert len(errors) == 1
-    assert errors[0] == expected_prefix
+    assert errors[0].startswith("extractor:")
+    assert "please report" not in errors[0]
 
 
-def test_extractor_error_is_prefixed_with_suffix_in_message(monkeypatch):
-    import core.download_controller as dc
-
-    class BoomYDL(_FakeYDL):
-        def download(self, urls):
-            raise ExtractorError("extractor blew up")
-
-    monkeypatch.setattr(dc, "YoutubeDL", lambda opts=None, **k: BoomYDL(opts or {}))
-    dt = _bare_controller()
-    dt._download_worker("https://youtu.be/x", {"format": "best"}, Path("."))
+def test_unsupported_error_fires_unsupported_url_sentinel(monkeypatch):
+    dt, _ = _worker_with_stdout(
+        monkeypatch, ["ERROR: Unsupported URL: https://bad"], rc=1
+    )
     events = _drain(dt._queue)
     errors = [data for event, data in events if event == "error"]
-    assert len(errors) == 1
-    # yt-dlp appends boilerplate to ExtractorError messages
-    assert errors[0].startswith("extractor:extractor blew up; please report this issue")
-
-
-def test_unsupported_error_is_caught_as_extractor_error(monkeypatch):
-    # In yt-dlp, UnsupportedError subclasses ExtractorError, so the
-    # except UnsupportedError branch in _download_worker is unreachable and
-    # the "unsupported_url" sentinel never fires. Kept as a regression test.
-    import core.download_controller as dc
-
-    class BoomYDL(_FakeYDL):
-        def download(self, urls):
-            raise UnsupportedError("https://bad")
-
-    monkeypatch.setattr(dc, "YoutubeDL", lambda opts=None, **k: BoomYDL(opts or {}))
-    dt = _bare_controller()
-    dt._download_worker("https://youtu.be/x", {"format": "best"}, Path("."))
-    events = _drain(dt._queue)
-    errors = [data for event, data in events if event == "error"]
-    assert len(errors) == 1
-    assert errors[0] == "extractor:Unsupported URL: https://bad"
+    assert errors == ["unsupported_url"]
 
 
 def test_download_worker_pushes_progress_events(monkeypatch):
-    import core.download_controller as dc
+    lines = [
+        "[info] title: Graphify - demo",
+        "[download] Destination: F:\\out\\Graphify [wRuQPV8Q4jc].webm",
+        "[download]  42.5% of ~20.60MiB at 1.23MiB/s ETA 00:12",
+        "[download]  100% of 20.60MiB in 00:15",
+    ]
+    dt, _ = _worker_with_stdout(monkeypatch, lines, rc=0)
+    events = _drain(dt._queue)
+    progress = [data for event, data in events if event == "progress"]
+    assert len(progress) == 2
+    assert progress[0]["status"] == "downloading"
+    assert progress[0]["_percent_str"] == "42.5%"
+    assert progress[0]["_speed_str"] == "1.23MiB/s"
+    assert progress[0]["_eta_str"] == "00:12"
+    assert progress[0]["filename"] == "F:\\out\\Graphify [wRuQPV8Q4jc].webm"
+    assert progress[1]["status"] == "finished"
+    assert ("done", None) in events
 
-    received_hooks = []
 
-    class HookYDL(_FakeYDL):
-        def download(self, urls):
-            for hook in self.opts["progress_hooks"]:
-                hook({"status": "downloading", "downloaded_bytes": 10, "total_bytes": 100})
+def test_download_worker_reports_popen_failure(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("no exe")
 
-    def fake_ydl(opts=None, **k):
-        obj = HookYDL(opts or {})
-        received_hooks.append(obj.opts)
-        return obj
-
-    monkeypatch.setattr(dc, "YoutubeDL", fake_ydl)
+    monkeypatch.setattr("subprocess.Popen", boom)
     dt = _bare_controller()
     dt._download_worker("https://youtu.be/x", {"format": "best"}, Path("."))
     events = _drain(dt._queue)
-    progress = [data for event, data in events if event == "progress"]
-    assert len(progress) == 1
-    assert progress[0]["status"] == "downloading"
-    # outtmpl is set as a side effect so filename paths resolve
-    assert "outtmpl" in received_hooks[0]
+    errors = [data for event, data in events if event == "error"]
+    assert errors == ["unknown:no exe"]
+
+
+def test_cancel_terminates_worker_mid_download(monkeypatch):
+    first_seen = threading.Event()
+    second = threading.Event()
+
+    def gen():
+        yield "[info] start"
+        first_seen.set()
+        second.wait(timeout=5)
+        yield "[download]  50.0% of 20MiB"
+        yield "[download] 100% of 20MiB"
+
+    proc = _FakeProc(gen(), rc=0)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: proc)
+
+    dt = _bare_controller()
+    t = threading.Thread(
+        target=lambda: dt._download_worker("u", {"format": "best"}, Path(".")),
+        daemon=True,
+    )
+    t.start()
+    assert first_seen.wait(timeout=5)
+    dt.cancel()
+    second.set()
+    t.join(timeout=5)
+    assert t.is_alive() is False
+    events = _drain(dt._queue)
+    assert not any(event in ("done", "error") for event, _ in events)
+
+
+def test_build_argv_basic_defaults():
+    argv = _build_argv({"format": "bv*+ba/b"}, "https://youtu.be/x", Path("C:\\out"))
+    assert argv[0] == "-f"
+    assert argv[1] == "bv*+ba/b"
+    assert "-o" in argv
+    assert str(Path("C:\\out") / "%(title)s [%(id)s].%(ext)s") in argv
+    for flag in ("--quiet", "--no-warnings", "--newline", "--progress"):
+        assert flag in argv
+    assert "--no-colors" not in argv
+    assert argv[-1] == "https://youtu.be/x"
+
+
+def test_build_argv_translates_format_sort_retries_and_limits():
+    opts = {
+        "format": "best",
+        "format_sort": ["res", "proto"],
+        "retries": 3,
+        "fragment_retries": None,
+        "throttledratelimit": 1000000,
+    }
+    argv = _build_argv(opts, "u", Path("."))
+    assert argv[argv.index("--format-sort") + 1] == "res,proto"
+    assert argv[argv.index("--retries") + 1] == "3"
+    assert "--fragment-retries" not in argv
+    assert argv[argv.index("--throttled-rate") + 1] == "1000000"
+
+
+def test_build_argv_cookies_and_extractor_args():
+    opts = {
+        "format": "best",
+        "cookiesfrombrowser": ["chrome"],
+        "cookiefile": "data/cookies.txt",
+        "extractor_args": {
+            "youtube": {"player_client": ["default", "-tv"]},
+            "youtube-ejs": {"POT": ["true"]},
+        },
+    }
+    argv = _build_argv(opts, "u", Path("."))
+    assert argv[argv.index("--cookies-from-browser") + 1] == "chrome"
+    assert argv[argv.index("--cookies") + 1] == "data/cookies.txt"
+    ea = argv[argv.index("--extractor-args") + 1]
+    assert "youtube:player_client=default,-tv" in ea
+    assert "youtube-ejs:POT=true" in ea
+
+
+def test_build_argv_skips_empty_extractor_args():
+    opts = {"format": "best", "extractor_args": {"youtube-ejs": {}}}
+    argv = _build_argv(opts, "u", Path("."))
+    assert "--extractor-args" not in argv
+
+
+def test_build_argv_audio_postprocessors_and_merge():
+    opts = {
+        "format": "bestaudio/best",
+        "postprocessors": [
+            {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
+            {"key": "FFmpegMetadata"},
+            {"key": "EmbedThumbnail"},
+        ],
+        "merge_output_format": "mp4",
+        "writethumbnail": True,
+    }
+    argv = _build_argv(opts, "u", Path("."))
+    assert "-x" in argv
+    assert argv[argv.index("--audio-format") + 1] == "mp3"
+    assert argv[argv.index("--audio-quality") + 1] == "192"
+    assert "--add-metadata" in argv
+    assert "--embed-thumbnail" in argv
+    assert "--write-thumbnail" in argv
+    assert argv[argv.index("--merge-output-format") + 1] == "mp4"
+
+
+def test_build_argv_js_runtimes_point_at_node_in_ffmpeg_bin(tmp_path):
+    opts = {
+        "format": "best",
+        "ffmpeg_location": str(tmp_path),
+        "js_runtimes": {"node": {"path": "ignored"}},
+    }
+    argv = _build_argv(opts, "u", Path("."))
+    assert argv[argv.index("--js-runtimes") + 1] == f"node:{Path(tmp_path) / 'node.exe'}"
+    assert argv[argv.index("--ffmpeg-location") + 1] == str(tmp_path)
+
+
+def test_build_argv_sponsorblock_default_categories():
+    argv = _build_argv({"format": "best", "sponsorblock_remove": ["sponsor", "intro"]}, "u", Path("."))
+    assert argv[argv.index("--sponsorblock-remove") + 1] == "sponsor,intro"
+
+    argv2 = _build_argv({"format": "best", "sponsorblock_remove": True}, "u", Path("."))
+    assert argv2[argv2.index("--sponsorblock-remove") + 1] == "sponsor"
+
+
+def test_parse_progress_downloading_with_speed_eta():
+    d = _parse_progress("[download]  42.5% of ~20.60MiB at 1.23MiB/s ETA 00:12")
+    assert d is not None
+    assert d["status"] == "downloading"
+    assert d["_percent_str"] == "42.5%"
+    assert d["downloaded_bytes"] == 0
+    assert d["total_bytes"] is None
+    assert d["_speed_str"] == "1.23MiB/s"
+    assert d["_eta_str"] == "00:12"
+
+
+def test_parse_progress_finishes_at_100():
+    d = _parse_progress("[download] 100% of 20.60MiB in 00:15")
+    assert d is not None
+    assert d["status"] == "finished"
+    assert d["downloaded_bytes"] == 1
+    assert d["total_bytes"] == 1
+
+
+def test_parse_progress_ignores_non_progress_lines():
+    assert _parse_progress("[info] some message") is None
+    assert _parse_progress("") is None
+
+
+def test_parse_destination():
+    dest = _parse_destination("[download] Destination: C:\\out\\x.mp4")
+    assert dest == "C:\\out\\x.mp4"
+    assert _parse_destination("not a dest") is None
+
+
+def test_strip_ytdlp_report_suffix():
+    assert _strip_ytdlp_report_suffix("x blew up; please report this issue. See docs") == "x blew up"
+    assert _strip_ytdlp_report_suffix("plain message") == "plain message"
+
+
+@pytest.mark.parametrize(
+    ("msg", "expected"),
+    [
+        ("Sign in to confirm you're not a bot", "age_restricted"),
+        ("This video is age restricted", "age_restricted"),
+        ("Video unavailable", "unavailable"),
+        ("HTTP Error 429: Too Many Requests", "rate_limited"),
+        (
+            "Could not copy cookie jar",
+            "فشل استخراج cookies من المتصفح — أغلق المتصفح أو استخدم ملف cookies في الإعدادات",
+        ),
+        ("Unsupported URL: https://bad", "unsupported_url"),
+        ("extractor blew up; please report this issue. See ...", "extractor:extractor blew up"),
+        ("some other failure", "download_error:some other failure"),
+    ],
+)
+def test_classify_error(msg, expected):
+    assert _classify_error(msg) == expected
 
 
 def test_poll_queue_dispatches_progress_log_and_done():
@@ -239,14 +424,17 @@ def test_poll_queue_returns_without_rescheduling_after_done():
     assert app._after_called == []
 
 
-def test_cancel_stops_and_cancels_pending_after():
+def test_cancel_stop_and_terminates_live_process():
     c = DownloadController(config=None)
     c._queue = queue.Queue()
     fake = _FakeApp()
     c._app = fake
     c._after_id = 99
+    proc = _FakeProc(["[info] x"], rc=1)
+    c._proc = proc
     c.cancel()
     assert c._stop_event.is_set()
+    assert proc.terminated is True
     assert fake._cancelled == [99]
 
 

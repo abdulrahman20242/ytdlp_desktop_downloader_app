@@ -7,7 +7,7 @@
     "window_height": 600
   },
   "download": {
-    "default_dir": "F:/Project/Python Projects/yt-dlp/ytdlp_desktop_downloader_app/downloads",
+    "default_dir": "F:/projects/Python Projects/yt-dlp/ytdlp_desktop_downloader_app/downloads",
     "default_quality": "720p",
     "default_mode": "video",
     "concurrent_fragments": 4,

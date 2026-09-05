@@ -17,6 +17,7 @@ MODE_OPTIONS = [
 FORMAT_MAP: dict[str, str] = {
     # bv = video-only (لا combined formats) → يضمن اختيار أعلى bitrate video-only
     # الترتيب: mp4+m4a أولاً (توافق أعلى) ← ثم أي video+audio ← ثم combined fallback
+    "Best":  "bv[ext=mp4]+ba[ext=m4a]/bv+ba/b",
     "best":  "bv[ext=mp4]+ba[ext=m4a]/bv+ba/b",
     "2160p": "bv[height<=2160][ext=mp4]+ba[ext=m4a]/bv[height<=2160]+ba/b[height<=2160]",
     "1440p": "bv[height<=1440][ext=mp4]+ba[ext=m4a]/bv[height<=1440]+ba/b[height<=1440]",
@@ -29,6 +30,7 @@ FORMAT_MAP: dict[str, str] = {
 }
 
 FORMAT_MAP_MP4: dict[str, str] = {
+    "Best":  "bv[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
     "best":  "bv[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
     "2160p": "bv[height<=2160][ext=mp4]+ba[ext=m4a]/b[height<=2160]",
     "1440p": "bv[height<=1440][ext=mp4]+ba[ext=m4a]/b[height<=1440]",
@@ -96,7 +98,7 @@ def get_common_opts(bin_dir: str, config) -> dict:
         "throttledratelimit": 102400,
         "format_sort": ["vcodec:h264,vp9,av01", "res", "br"],
         "ignoreerrors": False,
-        "quiet": True,
+        "quiet": False,
         "no_warnings": True,
         "js_runtimes": {"node": {}},
     }
