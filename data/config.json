@@ -18,25 +18,25 @@
     "write_subs": false,
     "sub_langs": "ar,en"
   },
-  "audio": {
-    "default_format": "mp3",
-    "mp3_quality": "192",
-    "embed_thumbnail": true
-  },
   "cookies": {
-    "source": "none",
+    "source": "file",
     "browser": "chrome",
     "file_path": "data/cookies.txt"
   },
   "advanced": {
-    "ffmpeg_location": "bin",
-    "js_runtime": "node",
-    "node_path": "bin/node.exe",
-    "use_nightly_yt_dlp": true,
     "show_debug_logs": false,
     "sponsorblock_remove": false,
     "sponsorblock_categories": [
       "sponsor"
-    ]
+    ],
+    "ffmpeg_location": "bin",
+    "js_runtime": "node",
+    "node_path": "bin/node.exe",
+    "use_nightly_yt_dlp": true
+  },
+  "audio": {
+    "default_format": "mp3",
+    "mp3_quality": "192",
+    "embed_thumbnail": true
   }
 }

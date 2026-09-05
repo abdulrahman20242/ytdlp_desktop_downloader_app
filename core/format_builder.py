@@ -41,7 +41,7 @@ FORMAT_MAP_MP4: dict[str, str] = {
 }
 
 
-def build_format_opts(quality: str, mode: str) -> dict:
+def build_format_opts(quality: str, mode: str, config=None) -> dict:
     opts: dict = {}
 
     if mode == "audio":
@@ -60,9 +60,16 @@ def build_format_opts(quality: str, mode: str) -> dict:
     else:
         # وضع video: يفضّل mp4+m4a، fallback لأي صيغة
         opts["format"] = FORMAT_MAP.get(q, FORMAT_MAP["best"])
-        opts["merge_output_format"] = "mp4"
+        opts["merge_output_format"] = _merge_output_format(config)
 
     return opts
+
+
+def _merge_output_format(config) -> str:
+    if config is None:
+        return "mp4"
+    fmt = config.get("download.merge_output_format", "mp4")
+    return str(fmt) if fmt else "mp4"
 
 
 def _audio_postprocessors(fmt: str) -> list[dict]:
@@ -100,6 +107,7 @@ def get_common_opts(bin_dir: str, config) -> dict:
         "ignoreerrors": False,
         "quiet": False,
         "no_warnings": True,
+        "verbose": bool(config.get("advanced.show_debug_logs", False)),
         # ضمان: أي رابط فيديو إن مرّت عليه list= لن يسحب القائمة كلها
         "noplaylist": True,
         "js_runtimes": {"node": {}},

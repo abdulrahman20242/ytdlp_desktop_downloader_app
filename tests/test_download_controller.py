@@ -250,6 +250,21 @@ def test_build_argv_adds_no_playlist_when_requested():
     assert "--no-playlist" not in argv2
 
 
+def test_build_argv_wires_verbose_flag():
+    argv = _build_argv({"format": "best", "verbose": True}, "u", Path("."))
+    assert "--verbose" in argv
+    argv_off = _build_argv({"format": "best", "verbose": False}, "u", Path("."))
+    assert "--verbose" not in argv_off
+    argv_missing = _build_argv({"format": "best"}, "u", Path("."))
+    assert "--verbose" not in argv_missing
+
+
+def test_build_argv_cookies_none_injects_no_cookie_flags():
+    argv = _build_argv({"format": "best"}, "u", Path("."))
+    assert "--cookies-from-browser" not in argv
+    assert "--cookies" not in argv
+
+
 def test_build_argv_translates_format_sort_retries_and_limits():
     opts = {
         "format": "best",

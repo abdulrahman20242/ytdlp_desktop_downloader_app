@@ -178,3 +178,31 @@ def test_get_common_opts_forces_single_video_mode(bin_dir):
     # A watch URL carrying list= params must never pull the whole playlist.
     opts = get_common_opts(str(bin_dir), _FakeConfig({}))
     assert opts["noplaylist"] is True
+
+
+def test_build_format_opts_wires_merge_output_from_config():
+    cfg = _FakeConfig({"download": {"merge_output_format": "mkv"}})
+    opts = build_format_opts("720p", "video", cfg)
+    assert opts["format"] == FORMAT_MAP["720p"]
+    assert opts["merge_output_format"] == "mkv"
+
+
+def test_build_format_opts_defaults_merge_output_to_mp4_when_no_config():
+    assert build_format_opts("720p", "video")["merge_output_format"] == "mp4"
+    assert build_format_opts("720p", "video", _FakeConfig({}))["merge_output_format"] == "mp4"
+
+
+def test_build_format_opts_mp3_bitrate_is_fixed_and_not_read_from_config():
+    cfg = _FakeConfig({"audio": {"mp3_quality": "320"}})
+    pps = build_format_opts("mp3", "audio", cfg)["postprocessors"]
+    extract = next(p for p in pps if p["key"] == "FFmpegExtractAudio")
+    assert extract["preferredquality"] == "192"
+
+
+def test_get_common_opts_wires_verbose_from_show_debug_logs(bin_dir):
+    on = get_common_opts(str(bin_dir), _FakeConfig({"advanced": {"show_debug_logs": True}}))
+    off = get_common_opts(str(bin_dir), _FakeConfig({"advanced": {"show_debug_logs": False}}))
+    missing = get_common_opts(str(bin_dir), _FakeConfig({}))
+    assert on["verbose"] is True
+    assert off["verbose"] is False
+    assert missing["verbose"] is False

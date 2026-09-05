@@ -18,15 +18,6 @@ _DEFAULTS = {
         "concurrent_fragments": 4,
         "retries": 10,
         "merge_output_format": "mp4",
-        "embed_thumbnail": False,
-        "embed_metadata": True,
-        "write_subs": False,
-        "sub_langs": "ar,en",
-    },
-    "audio": {
-        "default_format": "mp3",
-        "mp3_quality": "192",
-        "embed_thumbnail": True,
     },
     "cookies": {
         "source": "none",
@@ -34,10 +25,6 @@ _DEFAULTS = {
         "file_path": "data/cookies.txt",
     },
     "advanced": {
-        "ffmpeg_location": "bin",
-        "js_runtime": "node",
-        "node_path": "bin/node.exe",
-        "use_nightly_yt_dlp": True,
         "show_debug_logs": False,
         "sponsorblock_remove": False,
         "sponsorblock_categories": ["sponsor"],

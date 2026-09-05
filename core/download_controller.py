@@ -176,6 +176,8 @@ def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
         args += ["--quiet"]
     if opts.get("no_warnings", True):
         args += ["--no-warnings"]
+    if opts.get("verbose"):
+        args += ["--verbose"]
 
     args += ["--newline", "--progress"]
     args.append(url)

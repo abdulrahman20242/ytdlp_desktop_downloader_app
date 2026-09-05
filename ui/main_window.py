@@ -234,6 +234,10 @@ class MainWindow(ctk.CTkFrame):
         if default_dir:
             self._dir_var.set(default_dir)
 
+        mode = self.config.get("download.default_mode", "video")
+        quality = self.config.get("download.default_quality", "1080p")
+        self._quality_selector.apply_defaults(mode, quality)
+
     def _on_url_change(self, *_):
         url = self._url_var.get().strip()
         if is_valid_youtube_url(url):
@@ -364,7 +368,7 @@ class MainWindow(ctk.CTkFrame):
         mode = self._quality_selector.mode
 
         base_opts = get_common_opts("bin", self.config)
-        format_opts = build_format_opts(quality, mode)
+        format_opts = build_format_opts(quality, mode, self.config)
         opts = {**base_opts, **format_opts}
 
         cookies_source = self.config.get("cookies.source", "none")
@@ -462,6 +466,9 @@ class MainWindow(ctk.CTkFrame):
             open_folder(self._current_save_dir)
 
     def _open_settings(self):
+        current = self._dir_var.get().strip()
+        if current and current != self.config.get("download.default_dir", ""):
+            self.config.set("download.default_dir", current)
         dialog = SettingsDialog(self.master, self.config)
         self.wait_window(dialog)
         saved_dir = self.config.get("download.default_dir", "")

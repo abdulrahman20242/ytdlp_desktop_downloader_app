@@ -8,7 +8,25 @@ def test_defaults_are_loaded_when_no_config_file(config):
     assert config.get("ui.language") == "ar"
     assert config.get("download.default_quality") == "1080p"
     assert config.get("download.retries") == 10
-    assert config.get("audio.mp3_quality") == "192"
+    assert config.get("download.merge_output_format") == "mp4"
+
+
+def test_removed_fake_settings_no_longer_in_defaults(config):
+    # Keys that had no UI and no runtime effect were dropped from the schema.
+    for key in (
+        "download.embed_thumbnail",
+        "download.embed_metadata",
+        "download.write_subs",
+        "download.sub_langs",
+        "audio.embed_thumbnail",
+        "audio.mp3_quality",
+        "audio.default_format",
+        "advanced.ffmpeg_location",
+        "advanced.js_runtime",
+        "advanced.node_path",
+        "advanced.use_nightly_yt_dlp",
+    ):
+        assert config.get(key) is None
 
 
 def test_get_returns_default_for_missing_path(config):
@@ -52,9 +70,9 @@ def test_saved_file_with_unknown_key_is_kept(config, tmp_path):
 
 
 def test_valid_json_saved_file_is_read(config, tmp_path):
-    config.set("audio.default_format", "m4a")
+    config.set("download.merge_output_format", "mkv")
     reloaded = ConfigManager()
-    assert reloaded.get("audio.default_format") == "m4a"
+    assert reloaded.get("download.merge_output_format") == "mkv"
 
 
 def test_reset_to_defaults_reverts_changes(config, tmp_path):

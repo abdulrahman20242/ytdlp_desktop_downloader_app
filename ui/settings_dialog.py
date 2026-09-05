@@ -24,12 +24,10 @@ class SettingsDialog(ctk.CTkToplevel):
 
         self._general_tab = notebook.add("عام")
         self._download_tab = notebook.add("التحميل")
-        self._audio_tab = notebook.add("الصوت")
         self._advanced_tab = notebook.add("متقدم")
 
         self._build_general_tab()
         self._build_download_tab()
-        self._build_audio_tab()
         self._build_advanced_tab()
 
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -88,21 +86,6 @@ class SettingsDialog(ctk.CTkToplevel):
         self._retries_spin = ctk.CTkEntry(self._download_tab, textvariable=self._retries_var, width=60)
         self._retries_spin.grid(row=3, column=1, sticky="w", pady=5, padx=(5, 0))
 
-    def _build_audio_tab(self):
-        self._audio_fmt_var = ctk.StringVar()
-        ctk.CTkLabel(self._audio_tab, text="صيغة الصوت:").grid(row=0, column=0, sticky="w", pady=5)
-        self._audio_fmt_menu = ctk.CTkOptionMenu(
-            self._audio_tab, variable=self._audio_fmt_var, values=["mp3", "m4a"]
-        )
-        self._audio_fmt_menu.grid(row=0, column=1, sticky="ew", pady=5, padx=(5, 0))
-
-        self._mp3_quality_var = ctk.StringVar()
-        ctk.CTkLabel(self._audio_tab, text="جودة MP3:").grid(row=1, column=0, sticky="w", pady=5)
-        self._mp3_quality_menu = ctk.CTkOptionMenu(
-            self._audio_tab, variable=self._mp3_quality_var, values=["128", "192", "320"]
-        )
-        self._mp3_quality_menu.grid(row=1, column=1, sticky="ew", pady=5, padx=(5, 0))
-
     def _build_advanced_tab(self):
         self._cookies_source_var = ctk.StringVar()
         ctk.CTkLabel(self._advanced_tab, text="مصدر cookies:").grid(row=0, column=0, sticky="w", pady=5)
@@ -123,6 +106,11 @@ class SettingsDialog(ctk.CTkToplevel):
         ctk.CTkCheckBox(self._advanced_tab, text="إظهار سجلات التصحيح (debug)", variable=self._debug_var)\
             .grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
 
+        self._sponsorblock_var = ctk.BooleanVar()
+        ctk.CTkCheckBox(
+            self._advanced_tab, text="إزالة الرعايات والإعلانات الداخلية (SponsorBlock)", variable=self._sponsorblock_var
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=5)
+
     def _on_cookies_source_change(self, source: str):
         if source == "none":
             self._browser_menu.configure(state="disabled")
@@ -142,11 +130,25 @@ class SettingsDialog(ctk.CTkToplevel):
         self._mode_var.set(self.config.get("download.default_mode", "video"))
         self._fragments_var.set(str(self.config.get("download.concurrent_fragments", 4)))
         self._retries_var.set(str(self.config.get("download.retries", 10)))
-        self._audio_fmt_var.set(self.config.get("audio.default_format", "mp3"))
-        self._mp3_quality_var.set(str(self.config.get("audio.mp3_quality", "192")))
         self._cookies_source_var.set(self.config.get("cookies.source", "browser"))
         self._browser_var.set(self.config.get("cookies.browser", "chrome"))
         self._debug_var.set(self.config.get("advanced.show_debug_logs", False))
+        self._sponsorblock_var.set(self.config.get("advanced.sponsorblock_remove", False))
+
+    @staticmethod
+    def _parse_int(var: ctk.StringVar, default: int, minimum: int | None = None,
+                   maximum: int | None = None) -> int:
+        text = var.get().strip()
+        try:
+            value = int(text)
+        except ValueError:
+            value = default
+        if minimum is not None and value < minimum:
+            value = default
+        if maximum is not None and value > maximum:
+            value = default
+        var.set(str(value))
+        return value
 
     def _save(self):
         self.config.set("ui.theme", self._theme_var.get())
@@ -154,11 +156,10 @@ class SettingsDialog(ctk.CTkToplevel):
         self.config.set("download.default_dir", self._dir_var.get())
         self.config.set("download.default_quality", self._quality_var.get())
         self.config.set("download.default_mode", self._mode_var.get())
-        self.config.set("download.concurrent_fragments", int(self._fragments_var.get()))
-        self.config.set("download.retries", int(self._retries_var.get()))
-        self.config.set("audio.default_format", self._audio_fmt_var.get())
-        self.config.set("audio.mp3_quality", self._mp3_quality_var.get())
+        self.config.set("download.concurrent_fragments", self._parse_int(self._fragments_var, 4, minimum=1, maximum=16))
+        self.config.set("download.retries", self._parse_int(self._retries_var, 10, minimum=0, maximum=100))
         self.config.set("cookies.source", self._cookies_source_var.get())
         self.config.set("cookies.browser", self._browser_var.get())
         self.config.set("advanced.show_debug_logs", self._debug_var.get())
+        self.config.set("advanced.sponsorblock_remove", self._sponsorblock_var.get())
         self.destroy()
