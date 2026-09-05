@@ -105,6 +105,22 @@ def test_resolve_save_dir_falls_back_to_config_default(tmp_path):
     assert (tmp_path / "cfg").is_dir()
 
 
+def test_playlist_save_dir_creates_subfolder_named_after_playlist(tmp_path):
+    mw = object.__new__(MainWindow)
+    mw._current_playlist = {"title": 'Mix: Greatest Hits / 2026'}
+    target = mw._playlist_save_dir(tmp_path)
+    assert target == tmp_path / "Mix_ Greatest Hits _ 2026"
+    assert target.is_dir()
+
+
+def test_playlist_save_dir_falls_back_when_no_playlist_title(tmp_path):
+    mw = object.__new__(MainWindow)
+    mw._current_playlist = None
+    target = mw._playlist_save_dir(tmp_path)
+    assert target == tmp_path / "Playlist"
+    assert target.is_dir()
+
+
 # --------------------------------------------------------------------- #
 #  Settings dialog numeric validation
 # --------------------------------------------------------------------- #

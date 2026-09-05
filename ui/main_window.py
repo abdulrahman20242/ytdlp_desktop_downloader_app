@@ -19,7 +19,7 @@ from core.info_extractor import (
     extract_playlist,
 )
 from utils.validators import is_valid_youtube_url, classify_url
-from utils.file_utils import open_folder
+from utils.file_utils import open_folder, sanitize_folder_name
 
 
 class MainWindow(ctk.CTkFrame):
@@ -401,6 +401,14 @@ class MainWindow(ctk.CTkFrame):
         save_dir.mkdir(parents=True, exist_ok=True)
         return save_dir
 
+    def _playlist_save_dir(self, base: Path) -> Path:
+        """Subfolder named after the playlist inside the chosen destination."""
+        title = (self._current_playlist or {}).get("title") or ""
+        folder = sanitize_folder_name(title, fallback="Playlist")
+        target = base / folder
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
     def _start_download(self):
         if self._playlist_mode:
             return
@@ -430,15 +438,19 @@ class MainWindow(ctk.CTkFrame):
             return
 
         save_dir = self._resolve_save_dir()
+        if self._current_playlist:
+            save_dir = self._playlist_save_dir(save_dir)
         self._current_save_dir = save_dir
 
         opts, quality, mode = self._build_download_opts()
 
         self._playlist_run = {"completed": 0, "failed": 0, "total": len(entries)}
         self._progress_widget.reset()
+        title = (self._current_playlist or {}).get("title") or "قائمة التشغيل"
         self._logs_panel.append_log(
-            f"[INFO] بدء تنزيل القائمة: {len(entries)} فيديو"
+            f"[INFO] بدء تنزيل القائمة «{title}»: {len(entries)} فيديو"
         )
+        self._logs_panel.append_log(f"[INFO] الوجهة: {save_dir}")
         self._logs_panel.append_log(f"[INFO] الجودة: {quality} | الوضع: {mode}")
 
         subset_indices = [e.get("index", i + 1) for i, e in enumerate(entries)]
