@@ -53,3 +53,61 @@ def extract_duration(info: dict) -> int:
 
 def extract_uploader(info: dict) -> str:
     return info.get("uploader") or ""
+
+
+def _pick_thumbnail(info: dict) -> str | None:
+    t = info.get("thumbnail")
+    if t:
+        return str(t)
+    thumbs = info.get("thumbnails") or []
+    for t in reversed(thumbs):
+        if isinstance(t, dict) and t.get("url"):
+            return str(t["url"])
+    return None
+
+
+def extract_playlist(url: str) -> dict | None:
+    """Fetch a playlist's entry list quickly via flat extraction.
+
+    Returns a normalized dict:
+        {id, title, uploader, count, thumbnail, entries: [{index, id, title,
+          duration, thumbnail, url}]}
+    or None when the extraction fails. Each entry's `url` is a plain watch
+    URL so a single-video download can run per entry (with --no-playlist).
+    """
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "ffmpeg_location": str(BIN_DIR.resolve()),
+        "extract_flat": True,
+        "noplaylist": False,
+    }
+    try:
+        with YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception:
+        return None
+
+    entries = info.get("entries") or []
+    normalized = [
+        {
+            "index": i + 1,
+            "id": e.get("id") or "",
+            "title": e.get("title") or "بدون عنوان",
+            "duration": e.get("duration") or 0,
+            "thumbnail": _pick_thumbnail(e),
+            "url": e.get("url")
+            or e.get("webpage_url")
+            or (f"https://www.youtube.com/watch?v={e.get('id')}" if e.get("id") else ""),
+        }
+        for i, e in enumerate(entries)
+        if e and e.get("id")
+    ]
+    return {
+        "id": info.get("id") or "",
+        "title": info.get("title") or "قائمة تشغيل",
+        "uploader": info.get("uploader") or info.get("channel") or "",
+        "count": len(normalized),
+        "thumbnail": _pick_thumbnail(info),
+        "entries": normalized,
+    }

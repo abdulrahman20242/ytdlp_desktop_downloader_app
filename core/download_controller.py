@@ -99,6 +99,9 @@ def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
     if opts.get("merge_output_format"):
         args += ["--merge-output-format", str(opts["merge_output_format"])]
 
+    if opts.get("noplaylist"):
+        args += ["--no-playlist"]
+
     if ffmpeg:
         args += ["--ffmpeg-location", str(ffmpeg_dir)]
 
@@ -207,6 +210,17 @@ class DownloadController:
         self._thread.start()
         self._poll_queue()
 
+    def start_playlist_download(self, entries: list[dict], opts: dict, save_dir: Path):
+        self._stop_event.clear()
+        self._proc = None
+        self._thread = threading.Thread(
+            target=self._playlist_worker,
+            args=(list(entries), opts, Path(save_dir)),
+            daemon=True,
+        )
+        self._thread.start()
+        self._poll_queue()
+
     def _exe_path(self, opts: dict | None = None) -> Path:
         base = Path(__file__).resolve().parent.parent / "bin"
         ffmpeg = (opts or {}).get("ffmpeg_location")
@@ -214,9 +228,11 @@ class DownloadController:
             base = Path(ffmpeg)
         return base / "yt-dlp.exe"
 
-    def _download_worker(self, url: str, opts: dict, save_dir: Path):
-        # تأكد إن bin/ موجود في PATH حتى يلاقي yt-dlp كلاً من node.exe وffmpeg.exe
-        # (get_common_opts بيعمله، لكن هنا كـ safety net لو اتسمى الـ worker قبله)
+    # ------------------------------------------------------------------ #
+    #  Internal: run a single yt-dlp invocation, return result string
+    # ------------------------------------------------------------------ #
+
+    def _run_single(self, url: str, opts: dict, save_dir: Path, index=None) -> str:
         ffmpeg_loc = opts.get("ffmpeg_location", "")
         if ffmpeg_loc and ffmpeg_loc not in os.environ.get("PATH", ""):
             os.environ["PATH"] = ffmpeg_loc + os.pathsep + os.environ.get("PATH", "")
@@ -232,8 +248,7 @@ class DownloadController:
                 errors="replace",
             )
         except Exception as e:
-            self._queue.put(("error", f"unknown:{e}"))
-            return
+            return f"unknown:{e}"
         self._proc = proc
 
         first_error = None
@@ -260,6 +275,8 @@ class DownloadController:
                 prog = _parse_progress(line)
                 if prog:
                     prog["filename"] = filename or ""
+                    if index is not None:
+                        prog["index"] = index
                     self._queue.put(("progress", prog))
                 elif line.startswith("["):
                     self._queue.put(("log", f"[INFO] {line}"))
@@ -269,14 +286,77 @@ class DownloadController:
                 proc.terminate()
 
         if self._stop_event.is_set():
-            return
+            return "cancelled"
 
         rc = proc.wait()
         if rc == 0 and first_error is None:
+            return "ok"
+
+        msg = first_error or f"yt-dlp exited with code {rc}"
+        return _classify_error(msg)
+
+    # ------------------------------------------------------------------ #
+    #  Workers
+    # ------------------------------------------------------------------ #
+
+    def _download_worker(self, url: str, opts: dict, save_dir: Path):
+        result = self._run_single(url, opts, save_dir)
+        if self._stop_event.is_set():
+            return
+        if result == "ok":
             self._queue.put(("done", None))
         else:
-            msg = first_error or f"yt-dlp exited with code {rc}"
-            self._queue.put(("error", _classify_error(msg)))
+            self._queue.put(("error", result))
+
+    def _playlist_worker(self, entries: list[dict], opts: dict, save_dir: Path):
+        total = len(entries)
+        if total == 0:
+            self._queue.put(("playlist_done", None))
+            return
+
+        for pos, entry in enumerate(entries, 1):
+            if self._stop_event.is_set():
+                return
+
+            index = entry.get("index", pos)
+            item_id = entry.get("id", "")
+            url = (
+                entry.get("url")
+                or (f"https://www.youtube.com/watch?v={item_id}" if item_id else "")
+            )
+            if not url:
+                self._queue.put((
+                    "playlist_item",
+                    {"index": index, "id": item_id, "status": "failed",
+                     "error": "الرابط غير متاح", "position": pos, "total": total},
+                ))
+                continue
+
+            self._queue.put((
+                "playlist_item",
+                {"index": index, "id": item_id, "status": "downloading",
+                 "position": pos, "total": total},
+            ))
+
+            result = self._run_single(url, opts, save_dir, index=index)
+
+            if self._stop_event.is_set():
+                return
+
+            self._queue.put((
+                "playlist_item",
+                {"index": index, "id": item_id,
+                 "status": "completed" if result == "ok" else "failed",
+                 "error": None if result == "ok" else result,
+                 "position": pos, "total": total},
+            ))
+
+        if not self._stop_event.is_set():
+            self._queue.put(("playlist_done", None))
+
+    # ------------------------------------------------------------------ #
+    #  Event loop
+    # ------------------------------------------------------------------ #
 
     def _poll_queue(self):
         try:
@@ -300,6 +380,15 @@ class DownloadController:
                     cb = self._callbacks.get("log")
                     if cb:
                         cb(data)
+                elif event == "playlist_item":
+                    cb = self._callbacks.get("playlist_item")
+                    if cb:
+                        cb(data)
+                elif event == "playlist_done":
+                    cb = self._callbacks.get("playlist_done")
+                    if cb:
+                        cb()
+                    return
         except queue.Empty:
             pass
 

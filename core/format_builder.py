@@ -100,6 +100,8 @@ def get_common_opts(bin_dir: str, config) -> dict:
         "ignoreerrors": False,
         "quiet": False,
         "no_warnings": True,
+        # ضمان: أي رابط فيديو إن مرّت عليه list= لن يسحب القائمة كلها
+        "noplaylist": True,
         "js_runtimes": {"node": {}},
     }
 

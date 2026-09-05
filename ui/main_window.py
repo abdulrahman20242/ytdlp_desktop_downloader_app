@@ -10,10 +10,15 @@ from ui.progress_widget import ProgressWidget
 from ui.logs_panel import LogsPanel
 from ui.quality_selector import QualitySelector
 from ui.settings_dialog import SettingsDialog
+from ui.playlist_panel import PlaylistPanel
 from core.download_controller import DownloadController
-from core.format_builder import build_format_opts, get_common_opts
-from core.info_extractor import extract_info, get_available_qualities, extract_thumbnail, extract_title, extract_duration, extract_uploader
-from utils.validators import is_valid_youtube_url
+from core.format_builder import build_format_opts, get_common_opts, QUALITY_OPTIONS
+from core.info_extractor import (
+    extract_info, get_available_qualities,
+    extract_thumbnail, extract_title, extract_duration, extract_uploader,
+    extract_playlist,
+)
+from utils.validators import is_valid_youtube_url, classify_url
 from utils.file_utils import open_folder
 
 
@@ -26,6 +31,9 @@ class MainWindow(ctk.CTkFrame):
         self._controller.set_app(master)
         self._current_info: dict | None = None
         self._current_save_dir: Path | None = None
+        self._current_playlist: dict | None = None
+        self._playlist_mode = False
+        self._playlist_run: dict = {"completed": 0, "failed": 0, "total": 0}
 
         self.grid(sticky="nsew")
         self.grid_columnconfigure(0, weight=1)
@@ -51,7 +59,7 @@ class MainWindow(ctk.CTkFrame):
         main_frame = ctk.CTkFrame(self)
         main_frame.grid(row=2, column=0, sticky="nsew", padx=15, pady=5)
         main_frame.grid_columnconfigure(0, weight=1)
-        main_frame.grid_rowconfigure(7, weight=1)
+        main_frame.grid_rowconfigure(9, weight=1)
 
         url_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         url_frame.grid(row=0, column=0, sticky="ew", pady=(10, 5))
@@ -81,13 +89,26 @@ class MainWindow(ctk.CTkFrame):
         self._info_label = ctk.CTkLabel(info_frame, text="", anchor="w", justify="left")
         self._info_label.grid(row=1, column=1, sticky="nw", padx=5, pady=5)
 
-        tk.Frame(main_frame, height=1, bg="#555").grid(row=2, column=0, sticky="ew", pady=8)
+        self._playlist_panel = PlaylistPanel(
+            main_frame,
+            on_download_all=lambda: self._start_playlist_download(
+                list(self._current_playlist.get("entries", []))
+                if self._current_playlist else []
+            ),
+            on_download_selected=lambda: self._start_playlist_download(
+                self._playlist_panel.selected_entries()
+            ),
+        )
+        self._playlist_panel.grid(row=2, column=0, sticky="nsew", pady=5)
+        self._playlist_panel.hide()
+
+        tk.Frame(main_frame, height=1, bg="#555").grid(row=3, column=0, sticky="ew", pady=8)
 
         self._quality_selector = QualitySelector(main_frame)
-        self._quality_selector.grid(row=3, column=0, sticky="ew", pady=5)
+        self._quality_selector.grid(row=4, column=0, sticky="ew", pady=5)
 
         dir_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        dir_frame.grid(row=4, column=0, sticky="ew", pady=5)
+        dir_frame.grid(row=5, column=0, sticky="ew", pady=5)
         dir_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(dir_frame, text="مجلد الحفظ:").grid(row=0, column=0, padx=(5, 5))
@@ -97,7 +118,7 @@ class MainWindow(ctk.CTkFrame):
         ctk.CTkButton(dir_frame, text="تصفح", width=60, command=self._browse_dir).grid(row=0, column=2)
 
         action_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        action_frame.grid(row=5, column=0, sticky="ew", pady=10)
+        action_frame.grid(row=6, column=0, sticky="ew", pady=10)
 
         self._download_btn = ctk.CTkButton(
             action_frame, text="⬇ تحميل", command=self._start_download,
@@ -124,12 +145,12 @@ class MainWindow(ctk.CTkFrame):
         self._settings_btn.pack(side="right", padx=5)
 
         self._progress_widget = ProgressWidget(main_frame)
-        self._progress_widget.grid(row=6, column=0, sticky="ew", pady=5)
+        self._progress_widget.grid(row=7, column=0, sticky="ew", pady=5)
 
-        tk.Frame(main_frame, height=1, bg="#555").grid(row=7, column=0, sticky="ew", pady=0)
+        tk.Frame(main_frame, height=1, bg="#555").grid(row=8, column=0, sticky="ew", pady=0)
 
         self._logs_panel = LogsPanel(main_frame)
-        self._logs_panel.grid(row=8, column=0, sticky="nsew", pady=5)
+        self._logs_panel.grid(row=9, column=0, sticky="nsew", pady=5)
 
         status_bar = ctk.CTkLabel(self, text="جاهز", anchor="w", font=("", 10))
         status_bar.grid(row=3, column=0, sticky="ew", padx=15, pady=(0, 5))
@@ -158,10 +179,55 @@ class MainWindow(ctk.CTkFrame):
         def on_log(msg):
             self._logs_panel.append_log(msg)
 
+        def on_playlist_item(data):
+            self._playlist_panel.update_item(
+                data.get("index"), data.get("status", ""), data.get("error"),
+            )
+            total = data.get("total", 0)
+            position = data.get("position", 0)
+            if data.get("status") == "downloading":
+                self._progress_widget.reset()
+                self._progress_widget.set_message(
+                    f"الفيديو {position} من {total} — جارٍ التنزيل…"
+                )
+                self._playlist_run["total"] = total
+            elif data.get("status") == "completed":
+                self._playlist_run["completed"] += 1
+                self._logs_panel.append_log(
+                    f"[INFO] playlist: الفيديو {data.get('index')} تم بنجاح"
+                )
+            elif data.get("status") == "failed":
+                self._playlist_run["failed"] += 1
+                err = data.get("error") or "خطأ"
+                self._logs_panel.append_log(
+                    f"[ERROR] playlist: الفيديو {data.get('index')} فشل — {err}"
+                )
+
+        def on_playlist_done():
+            s = self._playlist_run
+            total = s.get("total", 0)
+            self._progress_widget.set_done()
+            self._progress_widget.set_message(
+                f"اكتملت القائمة ✓ — نجح {s['completed']} / فشل {s['failed']} (من {total})"
+            )
+            self._download_btn.configure(state="normal")
+            self._cancel_btn.configure(state="disabled")
+            self._open_folder_btn.configure(state="normal")
+            self._fetch_btn.configure(state="normal")
+            self._url_entry.configure(state="normal")
+            self._playlist_panel.finish_download(
+                s["completed"], s["failed"], total,
+            )
+            self._playlist_run = {"completed": 0, "failed": 0, "total": 0}
+            if self._playlist_mode:
+                self._download_btn.configure(state="disabled")
+
         self._controller.on("progress", on_progress)
         self._controller.on("done", on_done)
         self._controller.on("error", on_error)
         self._controller.on("log", on_log)
+        self._controller.on("playlist_item", on_playlist_item)
+        self._controller.on("playlist_done", on_playlist_done)
 
     def _load_config_state(self):
         default_dir = self.config.get("download.default_dir", "")
@@ -183,10 +249,18 @@ class MainWindow(ctk.CTkFrame):
         self._fetch_btn.configure(state="disabled", text="جارٍ...")
         self._title_label.configure(text="جارٍ استخراج المعلومات...")
         self._info_label.configure(text="")
+        self._download_btn.configure(state="disabled")
+        self._leave_playlist_mode()
+
+        mode = classify_url(url)
 
         def fetch():
-            info = extract_info(url)
-            self.after(0, self._display_info, info)
+            if mode == "playlist":
+                data = extract_playlist(url)
+                self.after(0, self._display_playlist, data)
+            else:
+                info = extract_info(url)
+                self.after(0, self._display_info, info)
 
         import threading
         threading.Thread(target=fetch, daemon=True).start()
@@ -219,6 +293,41 @@ class MainWindow(ctk.CTkFrame):
 
         self._download_btn.configure(state="normal")
 
+    def _display_playlist(self, playlist: dict | None):
+        self._fetch_btn.configure(state="normal", text="استعلام")
+
+        if not playlist or not playlist.get("entries"):
+            self._title_label.configure(text="❌ فشل استخراج القائمة — تحقق من الرابط")
+            self._download_btn.configure(state="disabled")
+            return
+
+        self._current_playlist = playlist
+        self._playlist_mode = True
+
+        title = playlist.get("title") or "قائمة تشغيل"
+        count = len(playlist.get("entries", []))
+        uploader = playlist.get("uploader") or ""
+        self._title_label.configure(text=f"📋 {title}")
+        self._info_label.configure(
+            text=f"قائمة تشغيل • {count} فيديو"
+            + (f"\nالقناة: {uploader}" if uploader else "")
+        )
+
+        thumb_url = playlist.get("thumbnail")
+        if thumb_url:
+            self._load_thumbnail(thumb_url)
+
+        self._quality_selector.set_qualities(QUALITY_OPTIONS)
+        self._playlist_panel.set_playlist(playlist)
+        self._playlist_panel.show()
+        self._download_btn.configure(state="disabled")
+
+    def _leave_playlist_mode(self):
+        self._playlist_mode = False
+        self._current_playlist = None
+        if hasattr(self, "_playlist_panel"):
+            self._playlist_panel.hide()
+
     def _load_thumbnail(self, url: str):
         def load():
             try:
@@ -250,15 +359,7 @@ class MainWindow(ctk.CTkFrame):
             self.config.set("download.default_dir", current)
         self.master.destroy()
 
-    def _start_download(self):
-        url = self._url_var.get().strip()
-        if not url:
-            return
-
-        save_dir = Path(self._dir_var.get() or "downloads")
-        save_dir.mkdir(parents=True, exist_ok=True)
-        self._current_save_dir = save_dir
-
+    def _build_download_opts(self):
         quality = self._quality_selector.quality
         mode = self._quality_selector.mode
 
@@ -278,17 +379,70 @@ class MainWindow(ctk.CTkFrame):
         if self.config.get("advanced.sponsorblock_remove", False):
             opts["sponsorblock_remove"] = self.config.get("advanced.sponsorblock_categories", ["sponsor"])
 
-        self._progress_widget.reset()
-        self._logs_panel.append_log(f"[INFO] بدء التحميل: {url}")
-        self._logs_panel.append_log(f"[INFO] الجودة: {quality} | الوضع: {mode}")
+        return opts, quality, mode
 
+    def _prepare_download_ui(self):
+        self._progress_widget.reset()
         self._download_btn.configure(state="disabled")
         self._cancel_btn.configure(state="normal")
         self._fetch_btn.configure(state="disabled")
         self._url_entry.configure(state="disabled")
         self._open_folder_btn.configure(state="disabled")
 
+    def _resolve_save_dir(self) -> Path:
+        raw = self._dir_var.get().strip()
+        if not raw:
+            raw = self.config.get("download.default_dir", "")
+        save_dir = Path(raw or "downloads")
+        save_dir.mkdir(parents=True, exist_ok=True)
+        return save_dir
+
+    def _start_download(self):
+        if self._playlist_mode:
+            return
+
+        url = self._url_var.get().strip()
+        if not url:
+            return
+
+        save_dir = self._resolve_save_dir()
+        self._current_save_dir = save_dir
+
+        opts, quality, mode = self._build_download_opts()
+
+        self._logs_panel.append_log(f"[INFO] بدء التحميل: {url}")
+        self._logs_panel.append_log(f"[INFO] الجودة: {quality} | الوضع: {mode}")
+        if "list=" in url:
+            self._logs_panel.append_log(
+                "[INFO] الرابط يحتوي على قائمة تشغيل — سيتم تنزيل الفيديو فقط"
+            )
+
+        self._prepare_download_ui()
         self._controller.start_download(url, opts, save_dir)
+
+    def _start_playlist_download(self, entries: list[dict]):
+        if not entries:
+            self._logs_panel.append_log("[INFO] لا توجد مقاطع محددة")
+            return
+
+        save_dir = self._resolve_save_dir()
+        self._current_save_dir = save_dir
+
+        opts, quality, mode = self._build_download_opts()
+
+        self._playlist_run = {"completed": 0, "failed": 0, "total": len(entries)}
+        self._progress_widget.reset()
+        self._logs_panel.append_log(
+            f"[INFO] بدء تنزيل القائمة: {len(entries)} فيديو"
+        )
+        self._logs_panel.append_log(f"[INFO] الجودة: {quality} | الوضع: {mode}")
+
+        subset_indices = [e.get("index", i + 1) for i, e in enumerate(entries)]
+        self._playlist_panel.begin_download(subset_indices)
+        self._prepare_download_ui()
+        self._open_folder_btn.configure(state="normal")
+
+        self._controller.start_playlist_download(entries, opts, save_dir)
 
     def _cancel_download(self):
         self._controller.cancel()
@@ -298,10 +452,18 @@ class MainWindow(ctk.CTkFrame):
         self._cancel_btn.configure(state="disabled")
         self._fetch_btn.configure(state="normal")
         self._url_entry.configure(state="normal")
+        if self._playlist_mode:
+            self._download_btn.configure(state="disabled")
+            self._playlist_panel.finish_download(0, 0, 0)
+            self._playlist_run = {"completed": 0, "failed": 0, "total": 0}
 
     def _open_folder(self):
         if self._current_save_dir and self._current_save_dir.exists():
             open_folder(self._current_save_dir)
 
     def _open_settings(self):
-        SettingsDialog(self.master, self.config)
+        dialog = SettingsDialog(self.master, self.config)
+        self.wait_window(dialog)
+        saved_dir = self.config.get("download.default_dir", "")
+        if saved_dir and self._dir_var.get().strip() != saved_dir:
+            self._dir_var.set(saved_dir)

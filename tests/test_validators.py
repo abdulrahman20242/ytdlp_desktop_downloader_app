@@ -4,6 +4,8 @@ from utils.validators import (
     PLAYLIST_RE,
     is_valid_youtube_url,
     is_playlist_url,
+    is_explicit_playlist_url,
+    classify_url,
     extract_video_id,
 )
 
@@ -130,3 +132,50 @@ def test_playlist_regex_matches_stripped_url_with_leading_whitespace():
     assert PLAYLIST_RE.search(
         "   https://www.youtube.com/watch?v=x&list=PL_ACB&t=1".strip()
     )
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://www.youtube.com/playlist?list=PLx9x", True),
+        ("https://youtube.com/playlist?list=PLx9x", True),
+        ("https://www.youtube.com/playlist?tab=pe&list=PLx9x", True),
+        ("http://youtube.com/playlist?list=PLx9x&index=3", True),
+        # watch/shorts/youtu.be URLs with a list param are NOT explicit playlists
+        ("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLx9x", False),
+        ("https://youtu.be/dQw4w9WgXcQ?list=PLx9x", False),
+        ("https://www.youtube.com/shorts/dQw4w9WgXcQ?list=PLx9x", False),
+        ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", False),
+        ("https://example.com/playlist?list=PLx9x", False),
+        ("", False),
+    ],
+)
+def test_detects_explicit_playlist_url(url, expected):
+    assert is_explicit_playlist_url(url) is expected
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        # Explicit playlist links always classify as playlist
+        ("https://www.youtube.com/playlist?list=PLx9x", "playlist"),
+        ("https://youtube.com/playlist?list=PLx9x&index=2", "playlist"),
+        # Videos stay videos even when playlist params are attached
+        ("https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLx9x&index=1", "video"),
+        ("https://youtu.be/dQw4w9WgXcQ?list=PLx9x", "video"),
+        ("https://www.youtube.com/shorts/dQw4w9WgXcQ?list=PLx9x", "video"),
+        # Plain video URLs
+        ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "video"),
+        ("https://youtu.be/dQw4w9WgXcQ", "video"),
+        ("https://www.youtube.com/embed/dQw4w9WgXcQ", "video"),
+        ("https://www.youtube.com/v/dQw4w9WgXcQ", "video"),
+        ("https://www.youtube.com/shorts/dQw4w9WgXcQ", "video"),
+        # Invalid / other sites
+        ("", None),
+        ("https://example.com", None),
+        ("just some text", None),
+        ("https://www.youtube.com", None),
+    ],
+)
+def test_classify_url_routes_playlist_vs_single_video(url, expected):
+    assert classify_url(url) is expected

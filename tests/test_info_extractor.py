@@ -4,6 +4,7 @@ from core import info_extractor
 from core.info_extractor import (
     get_available_qualities,
     extract_info,
+    extract_playlist,
     extract_thumbnail,
     extract_title,
     extract_duration,
@@ -121,3 +122,101 @@ def test_extract_duration(info, expected):
 )
 def test_extract_uploader(info, expected):
     assert extract_uploader(info) == expected
+
+
+class _RecordingYDL:
+    def __init__(self, info=None, fail=None):
+        self._info = info
+        self._fail = fail
+        self.opts = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def extract_info(self, url, download=False):
+        if self._fail:
+            raise self._fail
+        return self._info
+
+
+def test_extract_playlist_normalizes_entries(monkeypatch):
+    def factory(opts):
+        fake = _RecordingYDL(info={
+            "id": "PL1",
+            "title": "My Playlist",
+            "uploader": "Channel",
+            "thumbnail": "http://img/pl.jpg",
+            "entries": [
+                {
+                    "id": "aaa", "title": "First",
+                    "duration": 65, "url": "https://www.youtube.com/watch?v=aaa",
+                    "thumbnail": "http://img/a.jpg",
+                },
+                {
+                    "id": "bbb", "title": "Second",
+                    "duration": 0, "url": None, "thumbnail": None,
+                },
+                None,  # entries may contain None
+                {"id": "", "title": "missing id"},
+            ],
+        })
+        fake.opts = opts
+        return fake
+
+    monkeypatch.setattr(info_extractor, "YoutubeDL", factory)
+    result = extract_playlist("https://www.youtube.com/playlist?list=PL1")
+
+    assert result["title"] == "My Playlist"
+    assert result["uploader"] == "Channel"
+    assert result["count"] == 2
+    assert result["thumbnail"] == "http://img/pl.jpg"
+
+    first, second = result["entries"]
+    assert first == {
+        "index": 1, "id": "aaa", "title": "First", "duration": 65,
+        "thumbnail": "http://img/a.jpg",
+        "url": "https://www.youtube.com/watch?v=aaa",
+    }
+    # entries without a usable url get a watch URL built from the id
+    assert second == {
+        "index": 2, "id": "bbb", "title": "Second", "duration": 0,
+        "thumbnail": None,
+        "url": "https://www.youtube.com/watch?v=bbb",
+    }
+
+
+def test_extract_playlist_uses_flat_extraction_opts(monkeypatch):
+    captured = {}
+
+    def factory(opts):
+        captured["opts"] = opts
+        return _RecordingYDL(info={"entries": [{"id": "aaa", "title": "A"}]})
+
+    monkeypatch.setattr(info_extractor, "YoutubeDL", factory)
+    extract_playlist("https://www.youtube.com/playlist?list=PL1")
+    assert captured["opts"]["extract_flat"] is True
+    assert captured["opts"]["noplaylist"] is False
+
+
+def test_extract_playlist_returns_none_on_failure(monkeypatch):
+    monkeypatch.setattr(
+        info_extractor,
+        "YoutubeDL",
+        lambda opts: _RecordingYDL(fail=RuntimeError("boom")),
+    )
+    assert extract_playlist("https://www.youtube.com/playlist?list=PL1") is None
+
+
+def test_extract_playlist_handles_empty_entries(monkeypatch):
+    monkeypatch.setattr(
+        info_extractor,
+        "YoutubeDL",
+        lambda opts: _RecordingYDL(info={"title": "Empty", "entries": []}),
+    )
+    result = extract_playlist("https://www.youtube.com/playlist?list=PL1")
+    assert result is not None
+    assert result["entries"] == []
+    assert result["count"] == 0

@@ -239,6 +239,17 @@ def test_build_argv_basic_defaults():
     assert argv[-1] == "https://youtu.be/x"
 
 
+def test_build_argv_adds_no_playlist_when_requested():
+    argv = _build_argv(
+        {"format": "best", "noplaylist": True},
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLx9x",
+        Path("."),
+    )
+    assert "--no-playlist" in argv
+    argv2 = _build_argv({"format": "best"}, "u", Path("."))
+    assert "--no-playlist" not in argv2
+
+
 def test_build_argv_translates_format_sort_retries_and_limits():
     opts = {
         "format": "best",
@@ -413,6 +424,182 @@ def test_poll_queue_reschedules_when_only_progress():
     dt._queue.put(("progress", {"pct": 1}))
     dt._poll_queue()
     assert app._after_called == [(100, dt._poll_queue)]
+
+
+# --------------------------------------------------------------------- #
+#  Playlist orchestration
+# --------------------------------------------------------------------- #
+
+
+def _playlist_entries():
+    return [
+        {"index": 1, "id": "aaa", "url": "https://www.youtube.com/watch?v=aaa", "title": "A"},
+        {"index": 3, "id": "bbb", "url": "https://www.youtube.com/watch?v=bbb", "title": "B"},
+    ]
+
+
+def _run_playlist_worker(monkeypatch, entries, procs_by_url):
+    def fake_popen(cmd, **kwargs):
+        url = cmd[-1]
+        lines, rc = procs_by_url.get(url, ([], 0))
+        return _FakeProc(lines, rc=rc)
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    dt = _bare_controller()
+    dt._playlist_worker(entries, {"format": "best"}, Path("."))
+    return dt
+
+
+def test_playlist_worker_downloads_all_entries_in_order(monkeypatch):
+    dt = _run_playlist_worker(
+        monkeypatch,
+        _playlist_entries(),
+        {
+            "https://www.youtube.com/watch?v=aaa": (["[download] Destination: a.mp4"], 0),
+            "https://www.youtube.com/watch?v=bbb": ([], 0),
+        },
+    )
+    events = _drain(dt._queue)
+    items = [(d.get("index"), d.get("status")) for e, d in events if e == "playlist_item"]
+    assert items == [
+        (1, "downloading"),
+        (1, "completed"),
+        (3, "downloading"),
+        (3, "completed"),
+    ]
+    assert ("playlist_done", None) in events
+    assert not any(event in ("done", "error") for event, _ in events)
+
+
+def test_playlist_worker_marks_failed_item_and_continues(monkeypatch):
+    dt = _run_playlist_worker(
+        monkeypatch,
+        _playlist_entries(),
+        {
+            "https://www.youtube.com/watch?v=aaa": ([], 0),
+            "https://www.youtube.com/watch?v=bbb": (
+                ["ERROR: Video unavailable. This video is private."],
+                1,
+            ),
+        },
+    )
+    events = _drain(dt._queue)
+    items = [d for e, d in events if e == "playlist_item"]
+    completed = [d for d in items if d["status"] == "completed"]
+    failed = [d for d in items if d["status"] == "failed"]
+    assert len(completed) == 1
+    assert completed[0]["index"] == 1
+    assert len(failed) == 1
+    assert failed[0]["index"] == 3
+    assert failed[0]["error"] == "unavailable"
+    assert ("playlist_done", None) in events
+    assert not any(event == "error" for event, _ in events)
+
+
+def test_playlist_worker_skips_entry_without_url(monkeypatch):
+    dt = _run_playlist_worker(
+        monkeypatch,
+        [
+            {"index": 2, "id": "", "url": "", "title": "broken"},
+            {"index": 4, "id": "ccc", "url": "https://www.youtube.com/watch?v=ccc", "title": "C"},
+        ],
+        {"https://www.youtube.com/watch?v=ccc": ([], 0)},
+    )
+    events = _drain(dt._queue)
+    items = [d for e, d in events if e == "playlist_item"]
+    assert items[0]["status"] == "failed"
+    assert items[0]["error"] == "الرابط غير متاح"
+    assert items[1]["status"] == "downloading"
+    assert items[2]["status"] == "completed"
+    assert ("playlist_done", None) in events
+
+
+def test_playlist_worker_progress_events_carry_entry_index(monkeypatch):
+    dt = _run_playlist_worker(
+        monkeypatch,
+        [{"index": 7, "id": "ddd", "url": "https://www.youtube.com/watch?v=ddd", "title": "D"}],
+        {
+            "https://www.youtube.com/watch?v=ddd": (
+                [
+                    "[download] Destination: out\\D.mp4",
+                    "[download]  42.5% of ~20.60MiB at 1.23MiB/s ETA 00:12",
+                    "[download]  100% of 20.60MiB in 00:15",
+                ],
+                0,
+            )
+        },
+    )
+    events = _drain(dt._queue)
+    progress = [d for e, d in events if e == "progress"]
+    assert progress and progress[0]["index"] == 7
+    assert progress[0]["filename"] == "out\\D.mp4"
+    assert progress[0]["_percent_str"] == "42.5%"
+
+
+def test_cancel_during_playlist_stops_before_next_item(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    proc = _BlockingProc(["[info] start"], started, release, rc=0)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: proc)
+
+    dt = _bare_controller()
+    t = threading.Thread(
+        target=lambda: dt._playlist_worker(_playlist_entries(), {"format": "best"}, Path(".")),
+        daemon=True,
+    )
+    t.start()
+    assert started.wait(timeout=5)
+    dt.cancel()
+    release.set()
+    t.join(timeout=5)
+    assert t.is_alive() is False
+    events = _drain(dt._queue)
+    assert not any(event in ("playlist_done", "done", "error") for event, _ in events)
+    # the first item was announced as downloading before the cancel
+    announced = [d for e, d in events if e == "playlist_item"]
+    assert announced == [{"index": 1, "id": "aaa", "status": "downloading",
+                          "position": 1, "total": 2}]
+
+
+def test_start_playlist_download_spawns_thread_and_schedules_after(tmp_path, monkeypatch):
+    release = threading.Event()
+    started = threading.Event()
+    proc = _BlockingProc([], started, release, rc=0)
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: proc)
+
+    fake_app = _FakeApp()
+    c = DownloadController(config=None)
+    c.set_app(fake_app)
+    c._queue = queue.Queue()
+    c._thread = None
+
+    c.start_playlist_download(
+        [{"index": 1, "id": "aaa", "url": "https://www.youtube.com/watch?v=aaa"}],
+        {"format": "best"},
+        tmp_path,
+    )
+    assert started.wait(timeout=5)
+    assert c.is_downloading() is True
+    assert any(delay == 100 for delay, _ in fake_app._after_called)
+    release.set()
+    if c._thread:
+        c._thread.join(timeout=1)
+
+
+def test_poll_queue_dispatches_playlist_item_and_done():
+    dt = _bare_controller()
+    app = _FakeApp()
+    dt._app = app
+    received = {"items": [], "done": False}
+    dt._callbacks["playlist_item"] = lambda d: received["items"].append(d)
+    dt._callbacks["playlist_done"] = lambda: received.update(done=True)
+
+    dt._queue.put(("playlist_item", {"index": 1, "status": "downloading"}))
+    dt._queue.put(("playlist_done", None))
+    dt._poll_queue()
+    assert received["items"] == [{"index": 1, "status": "downloading"}]
+    assert received["done"] is True
+    assert app._after_called == []
 
 
 def test_poll_queue_returns_without_rescheduling_after_done():

@@ -24,6 +24,9 @@ class ProgressWidget(ctk.CTkFrame):
         self._info_label.configure(text="جاهز للتحميل")
         self._filename_label.configure(text="")
 
+    def set_message(self, text: str):
+        self._info_label.configure(text=text)
+
     def update_progress(self, d: dict):
         status = d.get("status", "")
 

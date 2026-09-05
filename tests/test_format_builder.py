@@ -172,3 +172,9 @@ def test_get_common_opts_keep_silent_and_quiet_flags(bin_dir):
     assert opts["no_warnings"] is True
     assert opts["ignoreerrors"] is False
     assert opts["throttledratelimit"] == 102400
+
+
+def test_get_common_opts_forces_single_video_mode(bin_dir):
+    # A watch URL carrying list= params must never pull the whole playlist.
+    opts = get_common_opts(str(bin_dir), _FakeConfig({}))
+    assert opts["noplaylist"] is True
