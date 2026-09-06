@@ -19,7 +19,7 @@
     "sub_langs": "ar,en"
   },
   "cookies": {
-    "source": "file",
+    "source": "none",
     "browser": "chrome",
     "file_path": "data/cookies.txt"
   },

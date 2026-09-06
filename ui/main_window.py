@@ -21,6 +21,29 @@ from core.info_extractor import (
 from utils.validators import is_valid_youtube_url, classify_url
 from utils.file_utils import open_folder, sanitize_folder_name
 
+# Rows inside ``main_frame`` that carry flexible weight while playlist mode
+# is active: the PlaylistPanel (row 2) and the LogsPanel (row 9).
+_PLAYLIST_ROW = 2
+_LOGS_ROW = 9
+# Flexible-space split inside ``main_frame``: the playlist list gets more of
+# any slack (2 parts) than the logs (1 part) so the playlist keeps its size
+# advantage, while the logs still grow on tall windows.
+_PLAYLIST_ROW_WEIGHT = 2
+_LOGS_ROW_WEIGHT = 1
+# Hard floors (screen px) kept on both flexible rows so neither collapses to
+# zero on short windows.  They match the measured internal structure at the
+# default 800x600 / 125% window: the playlist floor covers the compact header
+# + toolbar + roughly two media rows, and the logs floor keeps the panel
+# header plus ~4 text lines.  On very short windows each row stops at its
+# floor and the list/logs scroll internally instead.
+_PLAYLIST_MIN_HEIGHT = 244
+_LOGS_MIN_HEIGHT = 126
+# Rows on the outer window while playlist mode is active: ``main_frame``
+# should be the only flexible row so any extra window height feeds the
+# content (playlist + logs) instead of the near-empty status bar.
+_MAIN_FRAME_ROW = 2
+_STATUS_ROW = 3
+
 
 class MainWindow(ctk.CTkFrame):
     def __init__(self, master, config):
@@ -35,7 +58,13 @@ class MainWindow(ctk.CTkFrame):
         self._playlist_mode = False
         self._playlist_run: dict = {"completed": 0, "failed": 0, "total": 0}
 
-        self.grid(sticky="nsew")
+        # Anchor explicitly to the root's single grid cell (row 0 / column 0).
+        # ``StartupCheckFrame`` still occupies that cell while ``MainWindow`` is
+        # constructed, and ``grid(sticky=...)`` without ``row``/``column`` would
+        # otherwise auto-place this frame one row below it.  The root keeps its
+        # flexible weight on row 0, so an empty row 0 above it would swallow all
+        # slack and push the whole window content downward.
+        self.grid(row=0, column=0, sticky="nsew")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
 
@@ -48,21 +77,22 @@ class MainWindow(ctk.CTkFrame):
         header = ctk.CTkLabel(
             self, text="YT Downloader", font=("", 20, "bold")
         )
-        header.grid(row=0, column=0, pady=(15, 5))
+        header.grid(row=0, column=0, pady=(5, 2))
 
         sub_header = ctk.CTkLabel(
             self, text="YouTube Video & Audio Downloader", font=("", 12),
             text_color="gray"
         )
-        sub_header.grid(row=1, column=0, pady=(0, 10))
+        sub_header.grid(row=1, column=0, pady=(0, 3))
 
         main_frame = ctk.CTkFrame(self)
-        main_frame.grid(row=2, column=0, sticky="nsew", padx=15, pady=5)
+        main_frame.grid(row=2, column=0, sticky="nsew", padx=15, pady=4)
         main_frame.grid_columnconfigure(0, weight=1)
         main_frame.grid_rowconfigure(9, weight=1)
+        self._main_frame = main_frame
 
         url_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        url_frame.grid(row=0, column=0, sticky="ew", pady=(10, 5))
+        url_frame.grid(row=0, column=0, sticky="ew", pady=(1, 0))
         url_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(url_frame, text="رابط YouTube:").grid(row=0, column=0, padx=(5, 5))
@@ -80,6 +110,7 @@ class MainWindow(ctk.CTkFrame):
         info_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         info_frame.grid(row=1, column=0, sticky="ew", pady=5)
         info_frame.grid_columnconfigure(1, weight=1)
+        self._info_frame = info_frame
 
         self._title_label = ctk.CTkLabel(info_frame, text="", anchor="w", font=("", 13))
         self._title_label.grid(row=0, column=0, columnspan=2, sticky="ew", padx=5)
@@ -99,16 +130,16 @@ class MainWindow(ctk.CTkFrame):
                 self._playlist_panel.selected_entries()
             ),
         )
-        self._playlist_panel.grid(row=2, column=0, sticky="nsew", pady=5)
+        self._playlist_panel.grid(row=2, column=0, sticky="nsew", pady=(0, 2))
         self._playlist_panel.hide()
 
-        tk.Frame(main_frame, height=1, bg="#555").grid(row=3, column=0, sticky="ew", pady=8)
+        tk.Frame(main_frame, height=1, bg="#555").grid(row=3, column=0, sticky="ew", pady=0)
 
         self._quality_selector = QualitySelector(main_frame)
-        self._quality_selector.grid(row=4, column=0, sticky="ew", pady=5)
+        self._quality_selector.grid(row=4, column=0, sticky="ew", pady=1)
 
         dir_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        dir_frame.grid(row=5, column=0, sticky="ew", pady=5)
+        dir_frame.grid(row=5, column=0, sticky="ew", pady=1)
         dir_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(dir_frame, text="مجلد الحفظ:").grid(row=0, column=0, padx=(5, 5))
@@ -118,12 +149,12 @@ class MainWindow(ctk.CTkFrame):
         ctk.CTkButton(dir_frame, text="تصفح", width=60, command=self._browse_dir).grid(row=0, column=2)
 
         action_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        action_frame.grid(row=6, column=0, sticky="ew", pady=10)
+        action_frame.grid(row=6, column=0, sticky="ew", pady=2)
 
         self._download_btn = ctk.CTkButton(
             action_frame, text="⬇ تحميل", command=self._start_download,
             state="disabled", fg_color="#2d7a3a", hover_color="#236b2e",
-            height=35, font=("", 13, "bold"),
+            height=32, font=("", 13, "bold"),
         )
         self._download_btn.pack(side="left", padx=5)
 
@@ -145,15 +176,15 @@ class MainWindow(ctk.CTkFrame):
         self._settings_btn.pack(side="right", padx=5)
 
         self._progress_widget = ProgressWidget(main_frame)
-        self._progress_widget.grid(row=7, column=0, sticky="ew", pady=5)
+        self._progress_widget.grid(row=7, column=0, sticky="ew", pady=1)
 
         tk.Frame(main_frame, height=1, bg="#555").grid(row=8, column=0, sticky="ew", pady=0)
 
         self._logs_panel = LogsPanel(main_frame)
-        self._logs_panel.grid(row=9, column=0, sticky="nsew", pady=5)
+        self._logs_panel.grid(row=9, column=0, sticky="nsew", pady=4)
 
         status_bar = ctk.CTkLabel(self, text="جاهز", anchor="w", font=("", 10))
-        status_bar.grid(row=3, column=0, sticky="ew", padx=15, pady=(0, 5))
+        status_bar.grid(row=3, column=0, sticky="ew", padx=15, pady=(0, 3))
 
     def _setup_callbacks(self):
         def on_progress(d):
@@ -308,29 +339,68 @@ class MainWindow(ctk.CTkFrame):
         self._current_playlist = playlist
         self._playlist_mode = True
 
-        title = playlist.get("title") or "قائمة تشغيل"
-        count = len(playlist.get("entries", []))
-        uploader = playlist.get("uploader") or ""
-        self._title_label.configure(text=f"📋 {title}")
-        self._info_label.configure(
-            text=f"قائمة تشغيل • {count} فيديو"
-            + (f"\nالقناة: {uploader}" if uploader else "")
-        )
-
-        thumb_url = playlist.get("thumbnail")
-        if thumb_url:
-            self._load_thumbnail(thumb_url)
+        # The playlist header (thumbnail / title / channel / count) lives
+        # inside PlaylistPanel — hide the generic info area so nothing is
+        # displayed twice.
+        if hasattr(self, "_info_frame"):
+            self._info_frame.grid_remove()
+        self._title_label.configure(text="")
+        self._info_label.configure(text="")
 
         self._quality_selector.set_qualities(QUALITY_OPTIONS)
         self._playlist_panel.set_playlist(playlist)
+        self._set_playlist_layout_active(True)
         self._playlist_panel.show()
         self._download_btn.configure(state="disabled")
+
+    def _set_playlist_layout_active(self, active: bool):
+        """Share the window's flexible vertical space with the playlist.
+
+        While playlist mode is active the PlaylistPanel row and the LogsPanel
+        row inside ``main_frame`` both carry flexible weight, so extra window
+        height is used naturally instead of the fixed controls below growing
+        stale gaps.  The playlist list receives a larger flexible share
+        (2 parts) than the logs (1 part), and the logs row additionally keeps
+        a minimum height (``_LOGS_MIN_HEIGHT``) so it never collapses to an
+        unreadable strip: on short windows the playlist list absorbs the
+        shrink and scrolls internally instead.  ``main_frame`` itself also
+        becomes flexible so taller windows mostly feed the content area rather
+        than the near-empty status bar.  All weights are reset once playlist
+        mode ends so the normal single-video layout is untouched.
+        """
+        if not hasattr(self, "_main_frame"):
+            return
+        if active:
+            self._main_frame.grid_rowconfigure(
+                _PLAYLIST_ROW, weight=_PLAYLIST_ROW_WEIGHT,
+                minsize=_PLAYLIST_MIN_HEIGHT,
+            )
+            self._main_frame.grid_rowconfigure(
+                _LOGS_ROW, weight=_LOGS_ROW_WEIGHT, minsize=_LOGS_MIN_HEIGHT,
+            )
+            self.grid_rowconfigure(_MAIN_FRAME_ROW, weight=1)
+            self.grid_rowconfigure(_STATUS_ROW, weight=0)
+            # Pin the logs panel's requested height to its floor so the grid
+            # shrink pass can't cut through it on short windows; the playlist
+            # row then always keeps room for at least two media rows.
+            self._logs_panel.set_natural_height(_LOGS_MIN_HEIGHT)
+        else:
+            self._main_frame.grid_rowconfigure(
+                _PLAYLIST_ROW, weight=0, minsize=0,
+            )
+            self._main_frame.grid_rowconfigure(_LOGS_ROW, weight=1, minsize=0)
+            self.grid_rowconfigure(_MAIN_FRAME_ROW, weight=0)
+            self.grid_rowconfigure(_STATUS_ROW, weight=1)
+            self._logs_panel.set_natural_height(None)
 
     def _leave_playlist_mode(self):
         self._playlist_mode = False
         self._current_playlist = None
+        self._set_playlist_layout_active(False)
         if hasattr(self, "_playlist_panel"):
             self._playlist_panel.hide()
+        if hasattr(self, "_info_frame"):
+            self._info_frame.grid()
 
     def _load_thumbnail(self, url: str):
         def load():

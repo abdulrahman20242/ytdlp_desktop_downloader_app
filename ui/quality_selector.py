@@ -22,24 +22,26 @@ class QualitySelector(ctk.CTkFrame):
 
         self.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(self, text="الوضع:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        ctk.CTkLabel(self, text="الوضع:", height=20).grid(row=0, column=0, sticky="w", padx=5, pady=1)
         self._mode_var = ctk.StringVar(value="video")
         self._mode_menu = ctk.CTkOptionMenu(
             self,
             variable=self._mode_var,
             values=MODE_OPTIONS,
             command=self._on_mode_change,
+            height=21,
         )
-        self._mode_menu.grid(row=0, column=1, sticky="ew", padx=5, pady=5)
+        self._mode_menu.grid(row=0, column=1, sticky="ew", padx=5, pady=1)
 
-        ctk.CTkLabel(self, text="الجودة:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        ctk.CTkLabel(self, text="الجودة:", height=20).grid(row=1, column=0, sticky="w", padx=5, pady=1)
         self._quality_var = ctk.StringVar(value="1080p")
         self._quality_menu = ctk.CTkOptionMenu(
             self,
             variable=self._quality_var,
             values=QUALITY_OPTIONS,
+            height=21,
         )
-        self._quality_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=5)
+        self._quality_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=1)
 
     def _on_mode_change(self, mode: str):
         if mode == "audio":

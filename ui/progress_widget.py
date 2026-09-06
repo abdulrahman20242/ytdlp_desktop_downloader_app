@@ -8,14 +8,16 @@ class ProgressWidget(ctk.CTkFrame):
         self.grid_columnconfigure(0, weight=1)
 
         self._progress_bar = ctk.CTkProgressBar(self)
-        self._progress_bar.grid(row=0, column=0, sticky="ew", padx=5, pady=(5, 2))
+        self._progress_bar.grid(row=0, column=0, sticky="ew", padx=5, pady=(3, 1))
         self._progress_bar.set(0)
 
-        self._info_label = ctk.CTkLabel(self, text="", anchor="w")
-        self._info_label.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 2))
+        self._info_label = ctk.CTkLabel(self, text="", anchor="w", height=16)
+        self._info_label.grid(row=1, column=0, sticky="ew", padx=5, pady=(0, 1))
 
-        self._filename_label = ctk.CTkLabel(self, text="", anchor="w", font=("", 10))
-        self._filename_label.grid(row=2, column=0, sticky="ew", padx=5, pady=(0, 5))
+        self._filename_label = ctk.CTkLabel(
+            self, text="", anchor="w", font=("", 10), height=13,
+        )
+        self._filename_label.grid(row=2, column=0, sticky="ew", padx=5, pady=(0, 2))
 
         self.reset()
 
