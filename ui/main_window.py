@@ -330,16 +330,26 @@ class MainWindow(ctk.CTkFrame):
             progress.update_progress(d)
 
         def on_done():
+            run = self._active_run
             self._active_run = None
-            self._video_progress.set_done()
-            self._restore_video_ui()
-            self._video_logs.append_log("[INFO] اكتمل التحميل بنجاح")
+            progress, logs = self._page_widgets(run or _RUN_VIDEO)
+            progress.set_done()
+            logs.append_log("[INFO] اكتمل التحميل بنجاح")
+            if run == _RUN_PLAYLIST:
+                self._restore_playlist_ui()
+            else:
+                self._restore_video_ui()
 
         def on_error(data):
+            run = self._active_run
             self._active_run = None
-            self._video_progress.set_error(data)
-            self._restore_video_ui()
-            self._video_logs.append_log(f"[ERROR] {data}")
+            progress, logs = self._page_widgets(run or _RUN_VIDEO)
+            progress.set_error(data)
+            logs.append_log(f"[ERROR] {data}")
+            if run == _RUN_PLAYLIST:
+                self._restore_playlist_ui()
+            else:
+                self._restore_video_ui()
 
         def on_log(msg):
             if self._active_run is None:
