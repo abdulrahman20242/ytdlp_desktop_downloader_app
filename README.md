@@ -1,309 +1,54 @@
-# YT Downloader Desktop Application
+# YT Downloader
 
-**Version:** 3.0 (Sep 2026)
-**Author:** ReizanTech
-**Platform:** Windows 10/11 (x64)
-**Language:** Python 3.11+
+A Windows desktop application for downloading YouTube videos, audio, and playlists using `yt-dlp`.
 
----
+## Overview
 
-## 📋 Overview
+YT Downloader provides a graphical interface for downloading YouTube content. It runs `yt-dlp` as a subprocess for downloads and uses the Python `yt_dlp` API only for extracting video metadata. The UI is built with `customtkinter` and supports Arabic and English.
 
-YT Downloader is a desktop application for downloading YouTube videos, audio, and playlists with high efficiency. Built with Python, `customtkinter` for GUI, and `yt-dlp` as the core download engine.
+## Features
 
-### Key Features
+- **Video downloads** — up to 4K (2160p) with H.264 codec preference for compatibility
+- **Audio downloads** — MP3 (192 kbps) or M4A (no re-encode)
+- **Playlist support** — fetch, browse, and download all or selected items from a playlist
+- **Quality selection** — Best, 2160p, 1440p, 1080p, 720p, 480p, 360p (filtered to available resolutions)
+- **Download modes** — Video, MP4 Only, or Audio
+- **Cookie support** — import from Chrome, Firefox, Edge, or Brave; or load a `cookies.txt` file
+- **SponsorBlock** — optional removal of sponsor segments
+- **Throttling recovery** — automatic recovery when YouTube throttles download speed
+- **JavaScript challenge handling** — via `yt-dlp-ejs` plugin and Node.js
+- **Progress tracking** — real-time progress bar with speed and ETA
+- **Download cancellation** — cancel any in-progress download
+- **Logs panel** — collapsible log viewer with debug information
+- **Startup dependency check** — validates FFmpeg, FFprobe, Node.js, and yt-dlp at launch
+- **Settings dialog** — configure theme, language, download defaults, cookies, and advanced options
+- **Arabic / English UI** — right-to-left interface with full Arabic support
+- **Dark / Light / System theme** — switchable from settings
 
-- **Video Download** — up to 4K (2160p) with H.264 (avc1) preference for maximum compatibility
-- **Audio Download** — MP3 (192kbps) or M4A (no re-encode, faster)
-- **Format Selection** — Auto-select best format with `mp4+m4a` priority (or MP4-only mode)
-- **Playlist Download** — full playlist support with per-item status and an embedded playlist panel
-- **Throttling Recovery** — Automatic recovery when YouTube throttles speed
-- **JavaScript Challenges** — Solved via `yt-dlp-ejs` + Node.js (included `node.exe`)
-- **Cookie Support** — Browser import (Chrome/Firefox/Edge/Brave) or cookies.txt file
-- **Threaded Downloads** — UI never freezes during download
-- **Progress Tracking** — Real-time progress bar with speed and ETA
-- **Logs Panel** — Collapsible log viewer with debug information
-- **Startup Dependency Check** — Validates FFmpeg, FFprobe, Node.js, yt-dlp at launch
-- **Arabic/English UI** — Right-to-left interface with full Arabic support
+## Screenshots
 
----
+No screenshots are currently available in the repository.
 
-## 🏗 Architecture
+## Requirements
 
-### Single-Root Architecture
+### Required
 
-The application uses **one** persistent `CTk` root window. All screens (startup check, main window) are `CTkFrame` subclasses embedded in the same root. This avoids conflicts with customtkinter's internal `after` callbacks.
-
-```
-app.py
-  └── ctk.CTk() ─── root (single persistent window)
-        ├── StartupCheckFrame ─── dependency check screen
-        └── MainWindow ────────── main download interface
-              ├── QualitySelector
-              ├── ProgressWidget
-              ├── PlaylistPanel
-              └── LogsPanel
-```
-
-### Layer Structure
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                        UI Layer                           │
-│  MainWindow (CTkFrame) · SettingsDialog (CTkToplevel)     │
-│  ProgressWidget · LogsPanel · QualitySelector             │
-│  PlaylistPanel · StartupCheckFrame                        │
-└─────────────────────┬────────────────────────────────────┘
-                      │  events / callbacks via queue.Queue
-┌─────────────────────▼────────────────────────────────────┐
-│                  Controller Layer                         │
-│  DownloadController · InfoExtractor                       │
-│  ConfigManager · DependencyChecker · FormatBuilder        │
-└──────┬──────────────────────────────┬────────────────────┘
-       │ subprocess.Popen             │ python yt_dlp API
-┌──────▼───────────────┐    ┌─────────▼─────────────┐
-│  Download Engine     │    │  Info Extraction      │
-│  bin/yt-dlp.exe      │    │  yt_dlp.YoutubeDL     │
-│  (CLI, stdout parsed │    │  (download=False,     │
-│  via regex)          │    │   no subprocess)      │
-└──────┬───────────────┘    └─────────┬─────────────┘
-       │                              │
-┌──────▼──────────────────────────────▼──────────────┐
-│   bin/ffmpeg.exe  bin/ffprobe.exe  bin/node.exe     │
-└─────────────────────────────────────────────────────┘
-```
-
-**Important:** Downloads run `bin/yt-dlp.exe` as a **subprocess** (`subprocess.Popen`) and
-parse its `--newline --progress` stdout with regexes. The Python `yt_dlp.YoutubeDL` API
-is used **only** for extracting metadata/info (no download).
-
----
-
-## 📁 Project Structure
-
-```
-yt-downloader/
-│
-├── app.py                     ← Entry point (PATH setup + single root CTk)
-│
-├── ui/
-│   ├── __init__.py
-│   ├── main_window.py         ← Main window (CTkFrame) — URL input, info, controls, playlist
-│   ├── settings_dialog.py     ← Settings window (CTkToplevel) — 3 tabs
-│   ├── startup_check.py       ← Dependency check frame (CTkFrame)
-│   ├── progress_widget.py     ← Progress bar + speed/ETA stats
-│   ├── logs_panel.py          ← Collapsible log textbox
-│   ├── playlist_panel.py      ← Playlist items list + download-all/selected buttons
-│   └── quality_selector.py    ← Quality + mode dropdown selector
-│
-├── core/
-│   ├── __init__.py
-│   ├── config_manager.py      ← JSON config management with deep merge
-│   ├── dep_checker.py         ← Binary existence + version check
-│   ├── download_controller.py ← Threaded subprocess download + queue.Queue polling
-│   ├── info_extractor.py      ← YouTube info extraction (Python API, no download)
-│   └── format_builder.py      ← Format string builder + common opts
-│
-├── utils/
-│   ├── __init__.py
-│   ├── ui_logger.py           ← Logger → queue for thread-safe UI updates
-│   ├── validators.py          ← YouTube URL/playlist regex validation
-│   └── file_utils.py          ← File/folder helper functions
-│
-├── assets/
-│   ├── logo.ico
-│   ├── logo.png
-│   └── fonts/
-│
-├── bin/                       ← Binaries (not committed to Git)
-│   ├── ffmpeg.exe
-│   ├── ffprobe.exe
-│   ├── node.exe               ← Node.js standalone (JS runtime for yt-dlp-ejs)
-│   └── yt-dlp.exe             ← Download engine (invoked as subprocess)
-│
-├── data/                      ← Runtime files
-│   ├── config.json            ← Auto-generated on first run
-│   └── cookies.txt            ← Optional
-│
-├── requirements.txt
-└── docx/                      ← PRDs, reference, summary, diff docs
-```
-
-Default download folder: `~/Downloads/YTDownloader` (see **config defaults** below). There is **no** `build.spec`, `data/history.json`, `data/archive.txt`, `downloads/`, or `logs/` directory — those referenced paths do not exist in the current tree.
-
----
-
-## 🧩 Core Components
-
-### app.py (Entry Point)
-
-```python
-# 1. Add bin/ to PATH before any imports
-os.environ["PATH"] = str(PROJECT_ROOT / "bin") + os.pathsep + os.environ.get("PATH", "")
-
-# 2. Create ConfigManager (loads data/config.json, falls back to defaults)
-
-# 3. Create single persistent root CTk
-root = ctk.CTk()
-
-# 4. Show startup check as embedded frame
-StartupCheckFrame(root, on_startup_done)
-
-# 5. On continue → destroy StartupCheckFrame → create MainWindow
-def on_startup_done():
-    MainWindow(root, config)
-
-# 6. Single mainloop call
-root.mainloop()
-```
-
-### config_manager.py
-
-Manages `data/config.json` with deep merge (preserves defaults for missing keys). Supports dot-notation access: `config.get("download.default_quality")`.
-
-**Default config (from `_DEFAULTS` in `core/config_manager.py`):**
-```json
-{
-  "version": "1.0",
-  "ui": { "theme": "dark", "language": "ar", "window_width": 800, "window_height": 600 },
-  "download": {
-    "default_dir": "<home>/Downloads/YTDownloader",
-    "default_quality": "1080p",
-    "default_mode": "video",
-    "concurrent_fragments": 4,
-    "retries": 10,
-    "merge_output_format": "mp4"
-  },
-  "cookies": { "source": "none", "browser": "chrome", "file_path": "data/cookies.txt" },
-  "advanced": {
-    "show_debug_logs": false,
-    "sponsorblock_remove": false,
-    "sponsorblock_categories": ["sponsor"]
-  }
-}
-```
-
-> Note: older `data/config.json` files may carry extra keys (e.g. `audio.*`, `download.embed_*`,
-> `advanced.ffmpeg_location`, `advanced.node_path`, `advanced.use_nightly_yt_dlp`). These are
-> **not** part of the code defaults and are ignored. There is **no** `audio.*` settings section.
-
-### download_controller.py
-
-Threaded download engine. Downloads run `bin/yt-dlp.exe` as a subprocess; stdout is parsed
-line-by-line for `[download] N%`, speed, and ETA.
-
-- **`start_download(url, opts, save_dir)`** — spawns `_download_worker` (single video)
-- **`start_playlist_download(entries, opts, save_dir)`** — spawns `_playlist_worker` (maps each playlist entry → `_run_single`)
-- **`_run_single()`** — runs `subprocess.Popen([bin/yt-dlp.exe, ...argv])`, parses stdout (progress/destination/ERROR/WARNING), returns `"ok"`, `"cancelled"`, or an error ID
-- **`cancel()`** — sets stop event (terminates the running process)
-- **`on(event, callback)`** — `progress`, `done`, `error`, `log`, `playlist_item`, `playlist_done`
-- **`_poll_queue()`** — called every 100ms via `after()` to read events from queue
-
-**Error classification (`_classify_error`):**
-| Condition | Result |
+| Dependency | Details |
 |---|---|
-| Age restricted | `age_restricted` |
-| "Video unavailable" | `unavailable` |
-| Rate limited / 429 | `rate_limited` |
-| Cookie browser failure | Arabic message: "فشل استخراج cookies من المتصفح — أغلق المتصفح أو استخدم ملف cookies في الإعدادات" |
-| Unsupported URL (`UnsupportedError`) | `unsupported_url` |
-| Other extractor error | `extractor:{msg}` |
-| Download error | `download_error:{msg}` |
-| Process could not start | `unknown:{exc}` |
+| **OS** | Windows 10/11 (x64) |
+| **Python** | 3.11 or later |
+| **yt-dlp** | Python package (`yt-dlp[default]>=2025.1.1`) |
+| **FFmpeg** | `bin/ffmpeg.exe` — video/audio merging |
+| **FFprobe** | `bin/ffprobe.exe` — media probing |
 
-### format_builder.py
+### Optional
 
-Builds format strings and common opts for yt-dlp.
-
-**`build_format_opts(quality, mode, config=None)` — modes:**
-| Mode | Behavior |
+| Dependency | Purpose |
 |---|---|
-| `video` | `FORMAT_MAP` + `merge_output_format` (default `mp4`) |
-| `mp4_only` | `FORMAT_MAP_MP4` (stricter mp4 fallback chain) |
-| `audio` | `FORMAT_MAP["mp3"|"m4a"]` + audio postprocessors + `writethumbnail` |
+| **Node.js** | `bin/node.exe` — JavaScript runtime for `yt-dlp-ejs` plugin (some videos require this) |
+| **cookies.txt** | For age-restricted or private content |
 
-**Format priority (video):** `mp4+m4a` first → any video+audio → combined fallback
-
-**Format map (`FORMAT_MAP`):**
-| Quality | Format String |
-|---|---|
-| Best | `bv[ext=mp4]+ba[ext=m4a]/bv+ba/b` |
-| 2160p | `bv[height<=2160][ext=mp4]+ba[ext=m4a]/bv[height<=2160]+ba/b[height<=2160]` |
-| 1440p | `bv[height<=1440][ext=mp4]+ba[ext=m4a]/bv[height<=1440]+ba/b[height<=1440]` |
-| 1080p | `bv[height<=1080][ext=mp4]+ba[ext=m4a]/bv[height<=1080]+ba/b[height<=1080]` |
-| 720p | `bv[height<=720][ext=mp4]+ba[ext=m4a]/bv[height<=720]+ba/b[height<=720]` |
-| 480p | `bv[height<=480][ext=mp4]+ba[ext=m4a]/bv[height<=480]+ba/b[height<=480]` |
-| 360p | `bv[height<=360][ext=mp4]+ba[ext=m4a]/bv[height<=360]+ba/b[height<=360]` |
-| MP3 / M4A | `m4a/bestaudio/best` |
-
-**MP4-only map (`FORMAT_MAP_MP4`):**
-| Quality | Format String |
-|---|---|
-| Best | `bv[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b` |
-| Np | `bv[height<=N][ext=mp4]+ba[ext=m4a]/b[height<=N]` |
-
-**Audio postprocessors (`_audio_postprocessors`):**
-- MP3: `FFmpegExtractAudio` (preferredcodec `mp3`, quality `192`) + `FFmpegMetadata` + `EmbedThumbnail`
-- M4A: `FFmpegMetadata` + `EmbedThumbnail` (no re-encode)
-
-**`get_common_opts(bin_dir, config)` — base options:**
-```python
-{
-    "ffmpeg_location": str(bin_path),          # also prepends bin/ to PATH
-    "concurrent_fragments": config.get("download.concurrent_fragments", 4),
-    "retries": 10,                             # and fragment_retries
-    "throttledratelimit": 102400,              # 100 KB/s — triggers re-extraction
-    "format_sort": ["vcodec:h264,vp9,av01", "res", "br"],  # H.264 > VP9 > AV01
-    "ignoreerrors": False,
-    "quiet": False,                            # progress line is parsed from stdout
-    "no_warnings": True,
-    "verbose": config advanced.show_debug_logs,
-    "noplaylist": True,                        # never pull a playlist from a video link
-    "js_runtimes": {"node": {}},               # map to node:{bin}/node.exe in argv
-    "extractor_args": {"youtube-ejs": {}},     # yt-dlp-ejs plugin
-}
-```
-
-### dep_checker.py
-
-Checks for required binaries using absolute paths (`Path(__file__).resolve().parent.parent / "bin"`).
-
-| Dependency | Required | Check Method |
-|---|---|---|
-| FFmpeg | ✅ Yes | `bin/ffmpeg.exe` → `--version` |
-| FFprobe | ✅ Yes | `bin/ffprobe.exe` → `--version` |
-| Node.js | ⚠️ Optional | `bin/node.exe` (or in PATH) → `--version` |
-| yt-dlp | ✅ Yes | `import yt_dlp` → `yt_dlp.version.__version__` |
-
-### info_extractor.py
-
-Extracts video metadata using the **Python** `yt_dlp.YoutubeDL` API (`download=False`).
-Used for thumbnail preview, quality detection, and info display.
-
-- `extract_info(url)`, `extract_playlist(url)` — metadata (no download)
-- `get_available_qualities(url)` → `["Best", ...]` filtered from available heights
-- `extract_thumbnail / extract_title / extract_duration / extract_uploader`
-
----
-
-## 🔧 Installation & Setup
-
-### Prerequisites
-
-- Python 3.11+
-- Windows 10/11 (x64)
-
-### Setup
-
-```powershell
-# 1. Install Python dependencies
-pip install -r requirements.txt
-
-# 2. Run the application
-python app.py
-```
-
-### Requirements
+### Python Packages
 
 ```
 yt-dlp[default]>=2025.1.1
@@ -313,391 +58,238 @@ Pillow>=10.0.0
 requests>=2.31.0
 ```
 
-> `yt-dlp-ejs` is a yt-dlp **plugin** (not a Python import). It is enabled at download time
-> via `--extractor-args youtube-ejs` plus `--js-runtimes node:<bin>/node.exe`.
+> `yt-dlp-ejs` is a yt-dlp plugin, not a standalone Python import. It is activated at download time.
 
-### Binaries (in `bin/`)
+### Binaries (`bin/`)
 
-| File | Source | Purpose |
+| File | Source | Required |
 |---|---|---|
-| `ffmpeg.exe` | yt-dlp/FFmpeg-Builds | Video/audio merging |
-| `ffprobe.exe` | yt-dlp/FFmpeg-Builds | Media probing |
-| `node.exe` | Node.js standalone | JavaScript runtime for yt-dlp-ejs |
-| `yt-dlp.exe` | yt-dlp releases | **Download engine** (invoked as subprocess) |
+| `yt-dlp.exe` | yt-dlp releases | Yes |
+| `ffmpeg.exe` | yt-dlp/FFmpeg-Builds | Yes |
+| `ffprobe.exe` | yt-dlp/FFmpeg-Builds | Yes |
+| `node.exe` | Node.js standalone | No |
 
----
+The `bin/` directory is not committed to Git. You must place the required binaries there before running the application.
 
-## 🚀 Usage
+## Installation
+
+```powershell
+git clone https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app.git
+cd ytdlp_desktop_downloader_app
+
+python -m venv .venv
+.venv\Scripts\activate
+
+pip install -r requirements.txt
+```
+
+Then place the required binaries (`yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`) in the `bin/` directory. Optionally place `node.exe` in `bin/` for JavaScript challenge support.
+
+## Usage
 
 1. Run `python app.py`
-2. Startup check validates dependencies → click **Continue** ("متابعة")
-3. Paste a YouTube URL in the input field (video or playlist)
-4. Click **Fetch** to get video info (title, thumbnail, qualities, duration, uploader)
-5. Select mode (**Video / MP4 Only / Audio**) and quality (**Best / 2160p / 1440p / 1080p / 720p / 480p / 360p**, or **MP3 / M4A** for audio)
-6. Choose save folder (default: `~/Downloads/YTDownloader`)
-7. Click **⬇ Download** — playlists download into a per-playlist folder and populate the playlist panel
-8. Monitor progress bar, speed, ETA, and logs
-9. Click **📂 Open Folder** to open the download location
+2. The startup check validates your dependencies. Click **Continue** when ready.
+3. Paste a YouTube URL into the input field.
+4. Click **Fetch** to load video information (title, thumbnail, available qualities, duration, channel).
+5. Select a download mode (**Video**, **MP4 Only**, or **Audio**) and a quality level.
+6. Choose a save folder (defaults to `~/Downloads/YTDownloader`).
+7. Click **Download** to start.
+8. Monitor progress via the progress bar, speed, and ETA indicators.
+9. Click **Open Folder** to open the download location.
 
-### Settings (⚙ الإعدادات)
+### Playlist Usage
+
+1. Paste a playlist URL and click **Fetch**.
+2. The playlist panel appears showing all videos with thumbnails, titles, and durations.
+3. Use **Select All** / **Deselect All** to choose which items to download.
+4. Click **Download All** or **Download Selected**.
+5. Each playlist is saved into a subfolder named after the playlist.
+6. Individual item status (waiting, downloading, completed, failed) is shown in the panel.
+
+### Settings
+
+Open the settings dialog from the main window.
 
 | Tab | Options |
 |---|---|
-| عام (General) | Theme (dark/light/system), Language (ar/en), Save folder |
-| التحميل (Download) | Default quality, Default mode (video/mp4_only/audio), Concurrent fragments, Retries |
-| متقدم (Advanced) | Cookies source (none/browser/file), Browser selection, Debug logs, SponsorBlock removal |
+| **General** | Theme (dark/light/system), Language (ar/en), Save folder |
+| **Download** | Default quality, Default mode, Concurrent fragments, Retries |
+| **Advanced** | Cookie source (none/browser/file), Browser selection, Debug logs, SponsorBlock removal |
 
----
+## Configuration
 
-## 📦 Building EXE
+Settings are stored in `data/config.json`, created automatically on first run.
 
-A PyInstaller spec (`build.spec`) is **not yet present** in the repository. Until it is added,
-run the app from source (`python app.py`). Planned packaging approach: PyInstaller `--onedir`
-(target `dist/YTDownloader/YTDownloader.exe`).
+### Default Configuration
 
----
-
-## ⚙️ yt-dlp Configuration
-
-### PATH Configuration
-
-`app.py` adds `bin/` to `PATH` **before any imports** to ensure yt-dlp-ejs finds `node.exe` at load time. `get_common_opts()` also ensures `bin/` is on PATH for the subprocess.
-
-### CLI Flags Emitted by `_build_argv`
-
-Downloads invoke `bin/yt-dlp.exe` with flags built from the opts dict, including:
-`-f <format>`, `-x --audio-format/--audio-quality` (audio), `--add-metadata`,
-`--embed-thumbnail`, `--write-thumbnail`, `--merge-output-format mp4`,
-`--no-playlist`, `--ffmpeg-location`, `--concurrent-fragments`, `--retries`,
-`--fragment-retries`, `--throttled-rate`, `--format-sort`, `--js-runtimes node:<bin>/node.exe`,
-`--extractor-args youtube-ejs`, `--cookies` / `--cookies-from-browser`,
-`--sponsorblock-remove`, `-o "<save_dir>/%(title)s [%(id)s].%(ext)s"`,
-`--newline --progress`, plus `--quiet`, `--no-warnings`, `--verbose` as configured.
-
----
-
-## 📊 Status
-
-| Feature | Status |
-|---|---|
-| Format selection (H.264 + m4a priority) | ✅ |
-| Audio download (MP3/M4A) | ✅ |
-| Playlist download | ✅ |
-| Throttling recovery | ✅ |
-| Node.js JS challenges (yt-dlp-ejs) | ✅ |
-| Cookie support (browser/file) | ✅ |
-| Thumbnail preview | ✅ |
-| Settings dialog | ✅ |
-| Startup dependency check | ✅ |
-| SponsorBlock removal (optional) | ✅ |
-| Queue system (multiple concurrent downloads) | 🚧 Future |
-
----
-
-## 🔄 Changes from PRD (Before vs After)
-
-### Architecture
-
-| Aspect | PRD (Before) | Implementation (After) |
-|---|---|---|
-| **Window Architecture** | `StartupCheckDialog` as `CTkToplevel` + `MainWindow` as separate `CTk` | **Single-Root:** One `CTk` root, all screens are `CTkFrame` |
-| **Startup Check** | `StartupCheckDialog(CTkToplevel)` with threading + `after()` | `StartupCheckFrame(CTkFrame)` synchronous checks |
-| **MainWindow** | `class MainWindow(ctk.CTk)` | `class MainWindow(ctk.CTkFrame)` — embedded in root |
-| **Separator Widget** | `ctk.CTkSeparator` (not available in 5.2.2) | `tk.Frame(height=1, bg="#555")` |
-
-### Download Engine
-
-| Aspect | PRD (Before) | Implementation (After) |
-|---|---|---|
-| **Engine** | yt-dlp Python API (`YoutubeDL.download()`) | **Subprocess** `bin/yt-dlp.exe` + stdout regex parsing |
-| **Status Feed** | `progress_hooks` / `logger` objects | `--newline --progress` stdout lines parsed with `_PROGRESS_RE` / `_SPEED_RE` / `_ETA_RE` |
-| **Playlist** | 🚧 Future | `_playlist_worker` + `playlist_item` / `playlist_done` events + PlaylistPanel |
-
-### Cookie Handling
-
-| Aspect | PRD (Before) | Implementation (After) |
-|---|---|---|
-| **Default Source** | `"file"` | `"none"` (avoids Chrome lock errors) |
-| **Error Handling** | Not specified | Arabic error message with fix instructions |
-
-### Format Selection
-
-| Aspect | PRD (Before) | Implementation (After) |
-|---|---|---|
-| **Format Map** | `bv*+ba/b` (no mp4 preference) | `bv[ext=mp4]+ba[ext=m4a]/bv+ba/b` (+ `FORMAT_MAP_MP4`) |
-| **Codec Priority** | yt-dlp default (av01 > vp9 > avc1) | `format_sort: ["vcodec:h264,vp9,av01", "res", "br"]` |
-| **Throttling** | Not specified | `throttledratelimit: 102400` |
-| **Result** | `398+251` (av01+opus) | `136+140` (avc1+m4a) ✅ |
-
-### yt-dlp-ejs Integration
-
-| Aspect | PRD (Before) | Implementation (After) |
-|---|---|---|
-| **JS Runtime** | Only `extractor_args` with `android_vr` client | `js_runtimes: {"node": {}}` + `extractor_args: {"youtube-ejs": {}}` |
-| **PATH Setup** | In `get_common_opts` (too late) | In `app.py` before all imports |
-| **requirements.txt** | Not listed | `yt-dlp-ejs>=0.8.0` |
-
-### Dependency Checker
-
-| Aspect | PRD (Before) | Implementation (After) |
-|---|---|---|
-| **BIN_DIR** | `Path("bin")` (relative to CWD) | `Path(__file__).resolve().parent.parent / "bin"` (absolute) |
-| **FFprobe** | Not checked | Added `_check_ffprobe()` |
-| **Node.js Required** | `required=True` | `required=False` (optional) |
-
----
-
-## 🧵 Threading Model
-
-```
-Main Thread (UI)                    Worker Thread (downloader)
-─────────────────                   ──────────────────────────
-      │                                      │
-      │  start_download(url, opts) /         │
-      │  start_playlist_download(...)        │
-      │ ──────────────────────────────────►  │
-      │  _poll_queue() ◄── every 100ms ──┐   │
-      │      │                           │   │
-      │      ├── progress ──► update UI  │   │
-      │      ├── log ──────► append log  │   │
-      │      ├── done ─────► on_success  │   │
-      │      ├── error ────► on_error    │   │
-      │      ├── playlist_item ─► panel  │   │
-      │      └── playlist_done ──► final │   │
-      │                                  │   │
-      │  cancel()            (terminates  │
-      │ ───────────────►  the subprocess) │
+```json
+{
+  "version": "1.0",
+  "ui": {
+    "theme": "dark",
+    "language": "ar",
+    "window_width": 800,
+    "window_height": 600
+  },
+  "download": {
+    "default_dir": "<home>/Downloads/YTDownloader",
+    "default_quality": "1080p",
+    "default_mode": "video",
+    "concurrent_fragments": 4,
+    "retries": 10,
+    "merge_output_format": "mp4"
+  },
+  "cookies": {
+    "source": "none",
+    "browser": "chrome",
+    "file_path": "data/cookies.txt"
+  },
+  "advanced": {
+    "show_debug_logs": false,
+    "sponsorblock_remove": false,
+    "sponsorblock_categories": ["sponsor"]
+  }
+}
 ```
 
-### Communication Pattern
+Older config files may contain additional keys (e.g. `audio.*`, `download.embed_*`, `advanced.ffmpeg_location`, `advanced.node_path`, `advanced.use_nightly_yt_dlp`). These are not part of the current code defaults and are ignored.
 
-The UI thread and worker thread communicate through a **thread-safe `queue.Queue`**:
+## Cookies and Authentication
 
-```python
-# In worker thread (DownloadController._run_single):
-self._queue.put(("progress", prog))     # parsed [download] N%
-self._queue.put(("log", f"[INFO] {line}"))
-self._queue.put(("done", None))         # single video finished
-self._queue.put(("error", result))      # classified error ID
+Cookie support is disabled by default (`cookies.source = "none"`).
 
-# Playlist worker:
-self._queue.put(("playlist_item", {...}))
-self._queue.put(("playlist_done", None))
+When enabled:
 
-# In UI thread (polled every 100ms): _poll_queue → dispatch per event
-```
+- **Browser source** — extracts cookies directly from Chrome, Firefox, Edge, or Brave. The browser must be closed during extraction because Chrome locks its cookie database while running.
+- **File source** — loads a Netscape-format `cookies.txt` file (e.g. exported via a browser extension).
 
-### Thread Safety Rules
+Cookies may be needed for age-restricted content or region-locked videos.
 
-1. **UI updates** only in main thread (via `_poll_queue`)
-2. **yt-dlp calls** run as a **subprocess** in the worker thread
-3. **Queue** is the only shared mutable state (thread-safe by design)
-4. **Stop event** (`threading.Event`) for cancellation; `proc.terminate()` ends the subprocess
+## Architecture
 
----
-
-## 🔄 Download Flow (Detailed)
+The application uses a single `CTk` root window. All screens (startup check, main window) are `CTkFrame` subclasses embedded in the same root.
 
 ```
-1. User pastes URL (video or playlist)
-       │
-2. Validate URL (regex check)
-       │
-3. User clicks "Fetch Info"
-       │
-4. InfoExtractor.extract_info(url)  [Python yt_dlp API, download=False]
-   ├── Extracts: title, thumbnail, duration, uploader, formats
-   └── get_available_qualities() → ["Best", ...]
-       │
-5. Display info in UI (title, thumbnail, channel, duration, qualities)
-       │
-6. User clicks "⬇ Download"
-       │
-7. Build opts
-   ├── get_common_opts() → base options (incl. youtube-ejs extractor args)
-   ├── build_format_opts() → format + postprocessors (or audio PPs)
-   ├── Add cookies if configured
-   └── Add sponsorblock if configured
-       │
-8. DownloadController.start_download() / start_playlist_download()
-   ├── Creates daemon thread (worker)
-   ├── _build_argv() → CLI flags
-   └── subprocess.Popen([bin/yt-dlp.exe, ...argv])
-       │
-9. Worker parses stdout lines:
-   ├── [download] N% → progress event
-   ├── Destination → filename
-   ├── ERROR: / WARNING: / [info] → log events
-   ├── FFmpeg merges video + audio → <title> [<id>].mp4
-   └── Metadata + thumbnail embedding post-processors
-       │
-10. On success → "Download complete successfully"
-     └── Enable "📂 Open Folder" button
+app.py
+  └── ctk.CTk()  (single persistent window)
+        ├── StartupCheckFrame  (dependency check screen)
+        └── MainWindow  (main download interface)
+              ├── QualitySelector
+              ├── ProgressWidget
+              ├── PlaylistPanel
+              ├── LogsPanel
+              └── SettingsDialog  (CTkToplevel)
 ```
 
----
-
-## 🚀 Startup Flow
+### Layer Structure
 
 ```
+UI Layer
+  │  customtkinter widgets, events via queue.Queue
+  ▼
+Controller Layer
+  │  DownloadController, InfoExtractor, ConfigManager
+  │
+  ├── yt-dlp (Python API — info extraction only, download=False)
+  ├── yt-dlp.exe (subprocess — actual downloads, stdout parsed)
+  ├── FFmpeg / FFprobe (media processing)
+  └── Node.js / yt-dlp-ejs (JavaScript challenge solving)
+```
+
+Downloads run `bin/yt-dlp.exe` as a subprocess and parse its stdout line-by-line for progress, speed, and ETA. The Python `yt_dlp.YoutubeDL` API is used only for extracting metadata.
+
+## Project Structure
+
+```
+.
+├── app.py                     # Entry point
+├── ui/                        # GUI components
+│   ├── main_window.py         # Main window (CTkFrame)
+│   ├── settings_dialog.py     # Settings dialog (3 tabs)
+│   ├── startup_check.py       # Dependency check screen
+│   ├── progress_widget.py     # Progress bar + speed/ETA
+│   ├── logs_panel.py          # Collapsible log viewer
+│   ├── playlist_panel.py      # Playlist items panel
+│   └── quality_selector.py    # Quality + mode selector
+├── core/                      # Business logic
+│   ├── config_manager.py      # JSON config with deep merge
+│   ├── dep_checker.py         # Binary dependency validation
+│   ├── download_controller.py # Threaded subprocess downloads
+│   ├── info_extractor.py      # Video/playlist metadata extraction
+│   └── format_builder.py      # yt-dlp format strings + options
+├── utils/                     # Shared utilities
+│   ├── ui_logger.py           # Thread-safe logger for UI
+│   ├── validators.py          # YouTube URL validation
+│   └── file_utils.py          # File/folder helpers
+├── assets/                    # Static assets (fonts)
+├── bin/                       # Binaries (not in Git)
+├── data/                      # Runtime config (auto-generated)
+├── tests/                     # Test suite
+├── docx/                      # Design documents (PRD, reference)
+├── FAQ.md                     # Frequently asked questions
+├── requirements.txt           # Python dependencies
+└── README.md
+```
+
+## Development
+
+### Setup
+
+```powershell
+git clone https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app.git
+cd ytdlp_desktop_downloader_app
+
+python -m venv .venv
+.venv\Scripts\activate
+
+pip install -r requirements.txt
+```
+
+### Running
+
+```powershell
 python app.py
-    │
-    ├── 1. Add bin/ to PATH
-    │       (ensures node.exe found by yt-dlp-ejs at import time)
-    │
-    ├── 2. Create ConfigManager
-    │       (loads data/config.json, falls back to defaults)
-    │
-    ├── 3. Set appearance mode (dark/light/system)
-    │
-    ├── 4. Create single CTk root window
-    │       (800x600, min 700x500, themed)
-    │
-    ├── 5. Create StartupCheckFrame (embedded CTkFrame)
-    │       ├── Run DependencyChecker.check_all()
-    │       ├── Display results (✅/❌/⚠️)
-    │       └── Enable "Continue" button
-    │
-    ├── 6. User clicks "Continue"
-    │       ├── Destroy StartupCheckFrame
-    │       └── Create MainWindow (CTkFrame)
-    │
-    └── 7. root.mainloop()
-            (single event loop for entire app lifetime)
 ```
 
----
+### Testing
 
-## ❌ Error Catalog
+```powershell
+pytest -q
+```
 
-Error IDs produced by `DownloadController._classify_error` / `_run_single`:
+The test suite covers `core/`, `utils/`, and `ui/` modules with stubs for `customtkinter`, `tkinter`, and `yt_dlp`.
 
-| Error ID | Cause | Guidance |
-|---|---|---|
-| `age_restricted` | Video requires age verification ("Sign in to confirm your age") | Enable cookies in settings |
-| `unavailable` | Video deleted/private ("Video unavailable") | Check URL, try another video |
-| `rate_limited` | Too many requests (HTTP 429) | Wait before retrying |
-| cookie browser failure | Chrome open / DB locked | "أغلق المتصفح أو استخدم ملف cookies في الإعدادات" — close browser or use cookies file |
-| `unsupported_url` | Non-YouTube or invalid URL | Check URL format |
-| `extractor:{msg}` | YouTube API changed / extraction error | Update `yt-dlp` / `yt-dlp-ejs` |
-| `download_error:{msg}` | Other yt-dlp non-zero exit | Check logs for details |
-| `unknown:{exc}` | Process could not be started | See exception text |
-| `cancelled` | User cancelled | — |
-
----
-
-## 📄 Key Files Reference
-
-### `app.py` — Entry Point
-- Sets `os.environ["PATH"]` with `bin/` directory
-- Creates `ConfigManager`, single `ctk.CTk()` root
-- Manages StartupCheckFrame → MainWindow transition
-- Single `root.mainloop()` call
-
-### `ui/main_window.py` — MainWindow (CTkFrame)
-- **Fields:** `_url_var`, `_dir_var`, `_current_info`, `_current_save_dir`, config
-- **Methods:** `_fetch_info()`, `_display_info()`, `_start_download()`, `_start_playlist_download()`, `_cancel_download()`, `_open_settings()`, `_open_folder()`
-- **Events:** URL change → validate → enable/disable Fetch button; `playlist_item` / `playlist_done` → PlaylistPanel updates
-- **Layout:** `_PLAYLIST_ROW = 2` (weight 2, min 244px), `_LOGS_ROW = 9`; playlist/logs rows collapse when not needed
-
-### `ui/playlist_panel.py` — PlaylistPanel (CTkFrame)
-- Per-item status list, **Download All** and **Download Selected** buttons
-- Update methods driven by `playlist_item` events (state: waiting/downloading/done/error)
-
-### `ui/startup_check.py` — StartupCheckFrame (CTkFrame)
-- Runs `DependencyChecker.check_all()` synchronously
-- Displays results with icons (✅/❌/⚠️)
-- Calls `on_done` callback on continue
-
-### `ui/settings_dialog.py` — SettingsDialog (CTkToplevel)
-- 3 tabs: عام (General), التحميل (Download), متقدم (Advanced)
-- Reads/writes config via `ConfigManager.set()`
-- File browser for save directory
-
-### `ui/progress_widget.py` — ProgressWidget (CTkFrame)
-- `CTkProgressBar` + info label + filename label
-- `update_progress(d)`, `set_done()`, `set_error()`, `reset()`
-- Safe percent calculation with fallback
-
-### `ui/logs_panel.py` — LogsPanel (CTkFrame)
-- Collapsible `CTkTextbox` with toggle button
-- `append_log(message)`, `_clear()`
-- Auto-scrolls to bottom on new log
-
-### `ui/quality_selector.py` — QualitySelector (CTkFrame)
-- Mode dropdown (`video` / `mp4_only` / `audio`) — `MODE_OPTIONS`
-- Quality dropdown (`Best/2160p/1440p/1080p/720p/480p/360p`, or `MP3/M4A` for audio)
-- `set_qualities()`, `apply_defaults(mode, default_quality)` via `resolve_initial_selection`
-
-### `core/download_controller.py` — DownloadController
-- **State:** `_queue`, `_thread`, `_stop_event`, `_proc`, callbacks dict
-- **Methods:** `start_download()`, `start_playlist_download()`, `cancel()`, `is_downloading()`, `set_app()`
-- **Events:** `on("progress", cb)`, `on("done", cb)`, `on("error", cb)`, `on("log", cb)`, `on("playlist_item", cb)`, `on("playlist_done", cb)`
-- **Workers:** `_download_worker()`, `_playlist_worker()` (both call `_run_single()`)
-- **Parsing:** `_build_argv()`, `_run_single()` (Popen + stdout loop), `_parse_progress()`, `_parse_destination()`, `_classify_error()`, `_strip_ansi()`, `_strip_ytdlp_report_suffix()`
-
-### `core/format_builder.py` — Format Builder
-- `QUALITY_OPTIONS`, `MODE_OPTIONS` (exported; used by the UI)
-- `FORMAT_MAP`, `FORMAT_MAP_MP4`, `_audio_postprocessors()`
-- `build_format_opts(quality, mode, config=None)`, `get_common_opts(bin_dir, config)`
-
-### `core/info_extractor.py` — Info Extractor
-- `extract_info(url)`, `extract_playlist(url)` → sanitized info dicts
-- `get_available_qualities(url)` → `["Best", ...]`
-- `extract_thumbnail(info)`, `extract_title(info)`, `extract_duration(info)`, `extract_uploader(info)`
-
-### `core/config_manager.py` — ConfigManager
-- `get(key_path, default)`, `set(key_path, value)` — dot-notation + auto-save
-- `reset_to_defaults()`, `_merge(base, override)` — deep merge preserving defaults
-- Config file: `data/config.json`
-
-### `core/dep_checker.py` — DependencyChecker
-- `BIN_DIR` = absolute path via `Path(__file__).resolve().parent.parent / "bin"`
-- `check_all()` → `[DepResult, ...]`; checks FFmpeg, FFprobe, Node.js (optional), yt-dlp
-
-### `utils/ui_logger.py` — UILogger
-- Implements yt-dlp's logger interface (`debug`, `info`, `warning`, `error`)
-- Puts all messages into a `queue.Queue` for thread-safe UI updates
-- Filters `[debug]` prefixed messages
-
-### `utils/validators.py` — URL Validators
-- `is_valid_youtube_url(url)`, `extract_video_id(url)` — 11-char ID regex
-- `is_playlist_url(url)`, `is_explicit_playlist_url(url)`, `classify_url(url)` — playlist detection
-
-### `utils/file_utils.py` — File Helpers
-- `ensure_dir(path)`, `open_folder(path)`, `get_downloads_dir()`
-- `safe_filename(name)`, `sanitize_folder_name(name, fallback="Playlist")` — playlist folder naming
-
----
-
-## 🐛 Common Issues & Solutions
+## Troubleshooting
 
 ### "No supported JavaScript runtime could be found"
-- **Cause:** yt-dlp-ejs not installed or node.exe not found
-- **Fix:** `pip install yt-dlp-ejs` and ensure `bin/node.exe` exists
-- **Note:** Already handled by `app.py` adding `bin/` to PATH at startup
+
+The `yt-dlp-ejs` plugin requires Node.js. Place `node.exe` in the `bin/` directory or ensure Node.js is on your system PATH.
 
 ### "Could not copy Chrome cookie database"
-- **Cause:** Chrome is open, locking the cookie database
-- **Fix:** Close Chrome, or switch to "none" in Settings → متقدم (Advanced) → Cookies source
-- **Alternative:** Export cookies.txt from an extension and use file source
 
-### "invalid command name" errors in console
-- **Cause:** Multiple `CTk` instances created/destroyed (old architecture)
-- **Fix:** Already resolved — now uses single-root architecture
-- **Note:** If seen, ensure you're running the latest code
+Chrome locks its cookie database while running. Close Chrome before enabling browser cookie extraction, or switch to the file-based cookie source in Settings.
 
 ### Download stuck at 0% with very slow speed
-- **Cause:** YouTube throttling
-- **Fix:** `throttledratelimit: 102400` handles this automatically
-- **Expected:** Speed will recover after re-extraction
 
-### Format shows 398+251 instead of 136+140
-- **Cause:** yt-dlp default codec preference (av01 > vp9 > avc1)
-- **Fix:** `format_sort: ["vcodec:h264,vp9,av01", "res", "br"]`
-- **Expected:** Should show 136+140 (avc1+m4a)
+This is YouTube throttling. The application automatically detects and recovers from throttled speeds. The download speed should recover after re-extraction.
 
-### Audio downloads as webm/opus instead of m4a
-- **Cause:** Format string doesn't prioritize m4a
-- **Fix:** `format: "m4a/bestaudio/best"` (already set)
-- **Expected:** Downloads as .m4a (AAC) codec
+### Startup check shows missing dependencies
+
+The application checks for FFmpeg, FFprobe, Node.js (optional), and yt-dlp at launch. Place the required binaries in the `bin/` directory and install the Python package (`pip install -r requirements.txt`).
+
+### "invalid command name" console errors
+
+This was a bug in earlier versions using multiple `CTk` instances. The current single-root architecture resolves this. Ensure you are running the latest code.
+
+## License
+
+No license file is currently present in this repository.
+
+## Support
+
+Report issues at <https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app/issues>.
+
+## Additional Documentation
+
+- [FAQ.md](FAQ.md) — frequently asked questions about architecture, behavior, and setup
+- `docx/` — design documents (PRD, project reference, implementation diff)
