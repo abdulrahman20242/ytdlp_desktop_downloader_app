@@ -1,7 +1,11 @@
 # YT Downloader — Project Reference
 
-**Version:** 2.0 | **Platform:** Windows 10/11 x64 | **Python:** 3.11+
-**Repository:** ReizanTech | **Last Updated:** May 2026
+**Version:** 3.0 | **Platform:** Windows 10/11 x64 | **Python:** 3.11+
+**Repository:** ReizanTech | **Last Updated:** Sep 2026
+
+> **Engine note (v3):** Downloads run `bin/yt-dlp.exe` as an external subprocess.
+> The `yt_dlp` Python package is used **only** for info extraction (`download=False`).
+> The older "Python API engine" description was incorrect and has been removed.
 
 ---
 
@@ -11,13 +15,13 @@
 2. [Architecture](#2-architecture)
 3. [File Reference](#3-file-reference)
 4. [Configuration](#4-configuration)
-5. [yt-dlp Options Reference](#5-yt-dlp-options-reference)
+5. [yt-dlp CLI Options Reference](#5-yt-dlp-cli-options-reference)
 6. [Data Flow](#6-data-flow)
 7. [Threading Model](#7-threading-model)
 8. [Error Handling](#8-error-handling)
 9. [Build & Deployment](#9-build--deployment)
 10. [Development Guide](#10-development-guide)
-11. [Testing Scenarios](#11-testing-scenarios)
+11. [Testing](#11-testing)
 12. [Dependencies](#12-dependencies)
 13. [Appendix: Complete Change Log](#13-appendix-complete-change-log)
 
@@ -25,21 +29,23 @@
 
 ## 1. Project Overview
 
-YT Downloader is a Windows desktop application for downloading YouTube videos and audio. It uses `yt-dlp` as the download engine via its Python API (not subprocess), `customtkinter` for the GUI, and `yt-dlp-ejs` + Node.js for solving YouTube's JavaScript challenges.
+YT Downloader is a Windows desktop application for downloading YouTube videos, audio, and playlists. It downloads via **`bin/yt-dlp.exe` run as a subprocess** (stdout parsed with regex), uses `customtkinter` for the GUI, and `yt-dlp-ejs` + Node.js for solving YouTube's JavaScript challenges.
 
 ### Purpose
 
 Provide a simple, reliable YouTube downloader with:
 - Highest quality available (up to 4K 2160p)
 - Professional audio conversion (MP3 192kbps / M4A AAC)
+- Playlist download (all or selected items, per-item progress)
 - Modern YouTube support (n-sig challenges, age-restricted content)
 - Arabic/English bilingual interface
 - Throttling recovery
 - Cookie support (browser import or file)
+- SponsorBlock segment removal (optional)
 
 ### Target Users
 
-- **Casual users:** Paste URL → Download → Done
+- **Casual users:** Paste URL → Fetch → Download → Done
 - **Advanced users:** Manual quality/format selection, playlist download, cookie configuration, detailed logs
 
 ---
@@ -51,11 +57,11 @@ Provide a simple, reliable YouTube downloader with:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    ctk.CTk() [root]                         │
-│  Window: 800x600, min 700x500, theme-based                  │
+│  Window: config size (default 800x600), min 700x500         │
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  StartupCheckFrame (CTkFrame)                       │    │
-│  │  - DependencyChecker results                        │    │
+│  │  - DependencyChecker results (4 checks)             │    │
 │  │  - "Continue" button                                │    │
 │  │  - Destroyed on continue                            │    │
 │  └─────────────────────────────────────────────────────┘    │
@@ -66,7 +72,9 @@ Provide a simple, reliable YouTube downloader with:
 │  │  ┌───────────────────────────────────────────────┐  │    │
 │  │  │ URL Input + Fetch Button                      │  │    │
 │  │  ├───────────────────────────────────────────────┤  │    │
-│  │  │ Video Info (thumbnail, title, channel, time)  │  │    │
+│  │  │ Video Info (title, thumbnail, channel, time)  │  │    │
+│  │  ├───────────────────────────────────────────────┤  │    │
+│  │  │ PlaylistPanel (row 2, weight 2, hidden)       │  │    │
 │  │  ├───────────────────────────────────────────────┤  │    │
 │  │  │ QualitySelector (mode + quality)              │  │    │
 │  │  ├───────────────────────────────────────────────┤  │    │
@@ -74,7 +82,7 @@ Provide a simple, reliable YouTube downloader with:
 │  │  ├───────────────────────────────────────────────┤  │    │
 │  │  │ ProgressWidget (bar, speed, ETA)              │  │    │
 │  │  ├───────────────────────────────────────────────┤  │    │
-│  │  │ LogsPanel (collapsible, auto-scroll)          │  │    │
+│  │  │ LogsPanel (row 9, weight 1, collapsible)      │  │    │
 │  │  └───────────────────────────────────────────────┘  │    │
 │  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
@@ -85,56 +93,58 @@ Provide a simple, reliable YouTube downloader with:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    UI LAYER                                  │
-│  customtkinter-based                                         │
+│  customtkinter-based (Arabic UI strings)                     │
 │                                                             │
-│  MainWindow (CTkFrame)           SettingsDialog (Toplevel)  │
-│  ├── Builds all widgets          ├── 4 tabs                │
-│  ├── Manages user input          ├── Reads/writes config   │
-│  ├── Calls InfoExtractor         └── Modal (grab_set)      │
-│  ├── Controls DownloadController                             │
-│  └── Updates progress/logs                                  │
+│  MainWindow (CTkFrame)          SettingsDialog (Toplevel)   │
+│  ├── Builds all widgets        ├── 3 tabs (General,        │
+│  ├── Manages user input          Download, Advanced)        │
+│  ├── Calls InfoExtractor       ├── Reads/writes config      │
+│  ├── Controls DownloadController└── Modal (grab_set)       │
+│  └── Updates progress/logs                                   │
 │                                                             │
-│  ProgressWidget       LogsPanel         QualitySelector     │
-│  └── Progress bar     └── Textbox        └── Mode/Quality   │
-│      Speed/ETA          Collapsible          dropdowns      │
-│      Filename           Auto-scroll                         │
+│  PlaylistPanel         ProgressWidget       LogsPanel       │
+│  ├── item checkboxes  ├── Progress bar    ├── Textbox        │
+│  ├── Select all/None  ├── Speed/ETA       ├── Collapsible    │
+│  └── Download All/Selected └── Filename    └── Auto-scroll   │
+│                                                             │
+│  QualitySelector (video/mp4_only/audio; Best..360p/MP3/M4A) │
 └────────────────────────────────┬────────────────────────────┘
-                                 │ events via queue.Queue
+                                 │ events via queue.Queue (100ms poll)
 ┌────────────────────────────────▼────────────────────────────┐
 │                  CONTROLLER LAYER                            │
 │                                                             │
 │  DownloadController          InfoExtractor                  │
-│  ├── Queue-based threading   ├── extract_info(url)          │
-│  ├── start_download()        ├── get_available_qualities()  │
-│  ├── cancel()                └── extract_thumbnail()        │
-│  └── Event callbacks                                        │
+│  ├── start_download()       ├── extract_info(url)           │
+│  ├── start_playlist_download()├── extract_playlist(url)     │
+│  ├── _run_single()          ├── get_available_qualities()   │
+│  ├── events: progress/done/error/log/playlist_item/         │
+│  │           playlist_done   └── extract_title/duration/... │
+│  └── cancel() → stop_event + proc.terminate()               │
 │                                                             │
 │  ConfigManager               DependencyChecker              │
-│  ├── get(key_path)           ├── check_all()                │
-│  ├── set(key_path, value)    ├── FFmpeg, FFprobe, Node.js   │
-│  └── data/config.json        └── yt-dlp                     │
+│  ├── get(key_path)           ├── check_all() (4 checks)     │
+│  ├── set(key_path, value)    ├── FFmpeg, FFprobe required   │
+│  └── data/config.json        ├── Node.js optional           │
+│                              └── yt-dlp (import yt_dlp)     │
 │                                                             │
 │  FormatBuilder               Validators / FileUtils         │
-│  ├── FORMAT_MAP              ├── is_valid_youtube_url()     │
+│  ├── FORMAT_MAP / _MP4       ├── is_valid_youtube_url()     │
 │  ├── build_format_opts()     ├── is_playlist_url()          │
-│  └── get_common_opts()       └── open_folder()              │
+│  └── get_common_opts()       └── open_folder() / ensure_dir │
 └────────────────────────────────┬────────────────────────────┘
-                                 │ yt-dlp Python API
+                                 │ subprocess.Popen + stdout regex
 ┌────────────────────────────────▼────────────────────────────┐
 │                   DOWNLOAD ENGINE                           │
 │                                                             │
-│  yt_dlp.YoutubeDL                                           │
-│  ├── format_sort (codec pref)                               │
-│  ├── throttledratelimit                                     │
-│  ├── js_runtimes (node)                                     │
-│  ├── extractor_args (youtube-ejs)                           │
-│  ├── progress_hooks → queue                                 │
-│  ├── logger → queue                                         │
-│  └── postprocessors (FFmpegExtractAudio, Metadata, Thumb)   │
+│  bin/yt-dlp.exe  (built CLI argv, --newline --progress)     │
+│  ├── stdout parsed: progress %, speed, ETA, destination     │
+│  ├── ERROR:/WARNING: lines → [ERROR]/[WARN] log events      │
+│  │                                                          │
+│  External processes (invoked by yt-dlp):                    │
+│  ├── bin/ffmpeg.exe — merging, audio extraction, metadata   │
+│  └── bin/node.exe — JS challenge solving (yt-dlp-ejs)       │
 │                                                             │
-│  External processes (spawned by yt-dlp):                    │
-│  ├── bin/ffmpeg.exe — merging, audio extraction             │
-│  └── bin/node.exe — JS challenge solving                    │
+│  Info extraction only: yt_dlp.YoutubeDL(download=False)     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -142,13 +152,14 @@ Provide a simple, reliable YouTube downloader with:
 
 | ADR | Decision | Rationale |
 |---|---|---|
-| ADR-001 | Python API (not subprocess) | Full control over hooks/logger, exception handling |
-| ADR-002 | Threading + queue.Queue (not asyncio) | tkinter thread-safety, simpler debugging |
-| ADR-003 | PyInstaller `--onedir` (not `--onefile`) | Faster startup, antivirus-friendly |
-| ADR-004 | yt-dlp nightly channel | YouTube changes fast, stable lags behind |
-| ADR-005 | yt-dlp-ejs + Node.js | JavaScript challenge solving |
-| ADR-006 | format_sort: h264 > vp9 > av01 | Better compatibility, practical quality |
+| ADR-001 | **Subprocess engine** (`bin/yt-dlp.exe`) — not Python API | `proc.terminate()` for real cancellation; OS process isolation; CLI errors map cleanly to error IDs; matches how yt-dlp logs progress |
+| ADR-002 | Threading + `queue.Queue` (not asyncio) | tkinter thread-safety, simpler debugging |
+| ADR-003 | PyInstaller `--onedir` (planned, not yet built) | Faster startup, antivirus-friendly |
+| ADR-004 | ~~yt-dlp nightly channel~~ **Removed** | Conflicting with pip-installed yt-dlp; no nightly config key exists — use pinned `yt-dlp[default]>=X` |
+| ADR-005 | yt-dlp-ejs + Node.js | JavaScript challenge solving via `--js-runtimes node:<bin>/node.exe` |
+| ADR-006 | `format_sort`: h264 > vp9 > av01 | Better compatibility, practical quality |
 | ADR-007 | Single-root CTkFrame architecture | Avoids `after` callback conflicts |
+| ADR-008 | In-app playlist downloads (per-item subprocess) | Per-item progress via `playlist_item` events; only `list=` URLs trigger playlist mode |
 
 ---
 
@@ -157,99 +168,88 @@ Provide a simple, reliable YouTube downloader with:
 ### 3.1 `app.py` — Application Entry Point
 
 ```python
-# Signature
 def main() -> None
-
-# Flow
-1. os.environ["PATH"] += PROJECT_ROOT / "bin"     # Line 11
-2. config = ConfigManager()                          # Line 17
-3. ctk.set_appearance_mode(config.get("ui.theme"))  # Line 19
-4. root = ctk.CTk()                                  # Line 21
-5. root.iconbitmap("assets/logo.ico")                # Line 30
-6. StartupCheckFrame(root, on_startup_done)          # Line 38
-7. root.mainloop()                                   # Line 39
 ```
 
-**Critical detail:** `PATH` must be set before `import customtkinter` or any yt-dlp import because `yt-dlp-ejs` probes for `node` at module load time.
+**Flow (verified line numbers):**
+```python
+1. os.environ["PATH"] = str(PROJECT_ROOT / "bin") + os.pathsep + PATH   # Line 11 — BEFORE any imports
+2. config = ConfigManager()                                             # Line 20
+3. ctk.set_appearance_mode(config.get("ui.theme", "dark"))              # Line 22
+4. root = ctk.CTk()                                                     # Line 24
+5. root.title("YT Downloader")                                          # Line 25
+6. root.geometry(f"{w}x{h}")   # from ui.window_width/height            # Line 28
+7. root.minsize(700, 500)                                               # Line 29
+8. root.iconbitmap("assets/logo.ico")   # guarded (exists check)        # Line 34
+9. StartupCheckFrame(root, on_startup_done)                             # Line 41
+10. root.mainloop()                                                      # Line 42
+```
+`on_startup_done` (created at line 39): destroys `StartupCheckFrame`, constructs `MainWindow(root, config)`.
+
+**Critical detail:** `PATH` must include `bin/` **before any imports** because `yt-dlp-ejs` probes for `node` at module load time.
 
 ### 3.2 `ui/main_window.py` — MainWindow (CTkFrame)
 
-```python
-class MainWindow(ctk.CTkFrame):
-    def __init__(self, master, config)
-    def _setup_window(self)
-    def _build_ui(self)           # Builds all widgets in grid layout
-    def _setup_callbacks(self)    # Wires DownloadController events
-    def _load_config_state(self)  # Restores saved paths
-    def _on_url_change(self, *_)  # Validates URL → enable/disable fetch
-    def _fetch_info(self)         # Threaded info extraction
-    def _display_info(self, info) # Updates labels, thumbnail, qualities
-    def _load_thumbnail(self, url) # Downloads thumbnail in thread
-    def _browse_dir(self)         # Folder picker dialog
-    def _start_download(self)     # Builds opts, starts controller
-    def _cancel_download(self)    # Cancels and resets UI
-    def _open_folder(self)        # Opens save dir in Explorer
-    def _open_settings(self)      # Opens SettingsDialog
+`class MainWindow(ctk.CTkFrame)` at line 48. Grid-row constants:
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `_MAIN_FRAME_ROW` | `2` | main_frame row on `self` |
+| `_STATUS_ROW` | `3` | status bar row on `self` |
+| `_PLAYLIST_ROW` | `2` | PlaylistPanel row inside main_frame |
+| `_LOGS_ROW` | `9` | LogsPanel row inside main_frame |
+| `_PLAYLIST_MIN_HEIGHT` | `244` | minsize for playlist row |
+| `_LOGS_MIN_HEIGHT` | `126` | minsize for logs row |
+
+**Grid layout:**
+```
+self (rows 0-3):
+  row 0: header "YT Downloader"
+  row 1: subtitle
+  row 2: main_frame (weight=1, sticky nsew)
+  row 3: status_bar
+
+main_frame (rows 0-9):
+  row 0: URL input + Fetch button
+  row 1: info display (title, thumbnail, channel, duration)
+  row 2: PlaylistPanel        (hidden; weight 2, minsize 244)
+  row 3: separator (tk.Frame, height=1, bg="#555")
+  row 4: QualitySelector
+  row 5: save directory (entry + "تصفح" browse button)
+  row 6: action buttons (Download, Cancel, Open Folder, Settings)
+  row 7: ProgressWidget
+  row 8: separator (tk.Frame, height=1)
+  row 9: LogsPanel            (weight 1, minsize 126)
 ```
 
-**Grid layout (rows 0-3 on self, rows 0-8 on main_frame):**
-```
-row 0: Header "YT Downloader"
-row 1: Subtitle
-row 2: main_frame (sticky nsew)
-│   row 0: URL input + Fetch button
-│   row 1: Info display (thumbnail + metadata)
-│   row 2: Separator
-│   row 3: QualitySelector
-│   row 4: Save directory
-│   row 5: Action buttons (Download, Cancel, Open Folder, Settings)
-│   row 6: ProgressWidget
-│   row 7: Separator
-│   row 8: LogsPanel (weight=1, expands)
-row 3: Status bar
-```
+**Methods:** `_build_ui`, `_setup_callbacks`, `_load_config_state`, `_on_url_change`, `_fetch_info`, `_display_info`, `_display_playlist`, `_set_playlist_layout_active`, `_leave_playlist_mode`, `_load_thumbnail`, `_browse_dir`, `_on_close`, `_build_download_opts`, `_prepare_download_ui`, `_resolve_save_dir`, `_playlist_save_dir`, `_start_download`, `_start_playlist_download`, `_cancel_download`, `_open_folder`, `_open_settings`.
 
 ### 3.3 `ui/startup_check.py` — StartupCheckFrame (CTkFrame)
 
 ```python
 class StartupCheckFrame(ctk.CTkFrame):
     def __init__(self, master, on_done: Callable)
-    def _run_checks(self)           # Synchronous dependency check
-    def _display_results(self, results: list[DepResult])  # Shows icons + versions
-    def _on_continue(self)          # Disables button, calls on_done, destroys self
+    def _run_checks(self)            # Synchronous dependency check
+    def _display_results(self, results)  # green/red + version rows
+    def _on_continue(self)           # Disables button, calls on_done, destroys self
 ```
 
-**Note:** Checks run synchronously (no threading) because they're fast (file existence + `--version` subprocess calls). The UI updates via `self.update()` between phases.
+Checks run synchronously (file probing + `--version` subprocess calls are fast); UI updates via `self.update()` between phases.
 
 ### 3.4 `ui/settings_dialog.py` — SettingsDialog (CTkToplevel)
 
-```python
-class SettingsDialog(ctk.CTkToplevel):
-    def __init__(self, master, config)
-    def _build_ui(self)           # 4-tab notebook
-    def _build_general_tab(self)  # Theme, language, save dir
-    def _build_download_tab(self) # Default quality, mode, fragments, retries
-    def _build_audio_tab(self)    # Audio format, MP3 quality
-    def _build_advanced_tab(self) # Cookies source/browser, debug logs
-    def _load_config(self)        # Populates fields from config
-    def _save(self)               # Writes all fields to config, closes
-    def _browse_dir(self)         # File dialog for save dir
-```
-
-**Tab contents:**
+**Three tabs** (notebook + button row; no separate audio tab — audio format is chosen in the main window's QualitySelector):
 
 | Tab | Widgets | Config Keys |
 |---|---|---|
-| General | Theme OptionMenu, Language OptionMenu, Save Dir Entry+Browse | `ui.theme`, `ui.language`, `download.default_dir` |
-| Download | Quality OptionMenu, Mode OptionMenu, Fragments Entry, Retries Entry | `download.default_quality`, `download.default_mode`, `download.concurrent_fragments`, `download.retries` |
-| Audio | Format OptionMenu, MP3 Quality OptionMenu | `audio.default_format`, `audio.mp3_quality` |
-| Advanced | Cookies Source OptionMenu, Browser OptionMenu, Debug Checkbox | `cookies.source`, `cookies.browser`, `advanced.show_debug_logs` |
+| عام (General) | Theme, Language, Save Dir Entry + "..."/Browse | `ui.theme`, `ui.language`, `download.default_dir` |
+| التحميل (Download) | Default Quality, Default Mode, Concurrent Fragments spinbox, Retries spinbox | `download.default_quality`, `download.default_mode`, `download.concurrent_fragments`, `download.retries` |
+| متقدم (Advanced) | Cookies Source, Browser, Debug Logs checkbox | `cookies.source`, `cookies.browser`, `advanced.show_debug_logs` |
 
 ### 3.5 `ui/progress_widget.py` — ProgressWidget (CTkFrame)
 
 ```python
 class ProgressWidget(ctk.CTkFrame):
-    def __init__(self, master)
     def reset(self)                    # Clears all to initial state
     def update_progress(self, d: dict) # Handles 'downloading', 'finished', 'error'
     def set_done(self)                 # Shows completion state
@@ -259,77 +259,77 @@ class ProgressWidget(ctk.CTkFrame):
 
 **Widgets:**
 - `CTkProgressBar` (row 0) — value 0.0 → 1.0
-- Label (row 1) — "45.3% · 2.3 MB/s · ETA 00:32"
+- Info label (row 1) — e.g. "45.3% · 2.3 MB/s · ETA 00:32"
 - Filename label (row 2) — current file being downloaded
 
 ### 3.6 `ui/logs_panel.py` — LogsPanel (CTkFrame)
 
 ```python
 class LogsPanel(ctk.CTkFrame):
-    def __init__(self, master)
     def _toggle(self)    # Show/hide textbox
     def _clear(self)     # Clears all text
     def append_log(self, message)  # Inserts at end, auto-scrolls
 ```
 
-- Toggle button: "▼ Logs" / "▲ Logs"
-- Clear button: "Clear"
-- Font: Consolas 10 for readable logs
+Toggle button "▼/▲", clear button, monospace font for readable CLI lines.
 
 ### 3.7 `ui/quality_selector.py` — QualitySelector (CTkFrame)
 
 ```python
 class QualitySelector(ctk.CTkFrame):
-    def __init__(self, master)
-    def _on_mode_change(self, mode)        # Audio → show MP3/M4A, Video → show qualities
-    def set_qualities(self, qualities)      # Update available video qualities
-    @property
-    def quality(self) -> str               # Returns lowercase quality string
-    @property
-    def mode(self) -> str                  # Returns mode string
+    def set_qualities(self, qualities)  # Restrict video quality list to available
+    @property quality -> str            # Lowercase quality string
+    @property mode -> str               # Mode string
 ```
 
-**Mode options:** `["video", "mp4_only", "audio"]`
-
-**Quality options (video):** `["Best", "2160p", "1440p", "1080p", "720p", "480p", "360p"]`
-
-**Quality options (audio):** `["MP3", "M4A"]`
+- **Modes:** `["video", "mp4_only", "audio"]` (`MODE_OPTIONS`)
+- **Video qualities:** `["Best", "2160p", "1440p", "1080p", "720p", "480p", "360p"]` (`QUALITY_OPTIONS`)
+- **Audio formats:** `["MP3", "M4A"]` (`AUDIO_FORMATS`)
+- Switching to `audio` swaps the quality dropdown to MP3/M4A.
 
 ### 3.8 `core/config_manager.py` — ConfigManager
 
 ```python
 class ConfigManager:
     def __init__(self)
-    def _load(self) -> dict          # Loads + merges with defaults
-    def _merge(self, base, override) # Deep merge, preserves missing keys
-    def get(self, key_path, default) # Dot-notation: "download.default_quality"
+    def _load(self) -> dict          # Loads + deep-merges with defaults
+    def _merge(self, base, override) # Recursive merge, preserves missing keys
+    def get(self, key_path, default=None)  # Dot-notation read
     def set(self, key_path, value)   # Dot-notation write + auto-save
     def _save(self)                  # Writes JSON to data/config.json
     def reset_to_defaults(self)      # Restores factory defaults
 ```
 
-**Config file:** `data/config.json` (auto-created with defaults on first run)
+**Config file:** `data/config.json` (auto-created with defaults on first run). `CONFIG_PATH` at `core/config_manager.py:4`.
 
-**Default values:**
+**Default values (`_DEFAULTS`, lines 6-32):**
 
 ```json
 {
   "version": "1.0",
-  "ui": {"theme": "dark", "language": "ar", "window_width": 800, "window_height": 600},
-  "download": {
-    "default_dir": "C:/Users/%USER%/Downloads/YTDownloader",
-    "default_quality": "1080p", "default_mode": "video",
-    "concurrent_fragments": 4, "retries": 10,
-    "merge_output_format": "mp4",
-    "embed_thumbnail": false, "embed_metadata": true,
-    "write_subs": false, "sub_langs": "ar,en"
+  "ui": {
+    "theme": "dark",
+    "language": "ar",
+    "window_width": 800,
+    "window_height": 600
   },
-  "audio": {"default_format": "mp3", "mp3_quality": "192", "embed_thumbnail": true},
-  "cookies": {"source": "none", "browser": "chrome", "file_path": "data/cookies.txt"},
+  "download": {
+    "default_dir": "<home>/Downloads/YTDownloader",
+    "default_quality": "1080p",
+    "default_mode": "video",
+    "concurrent_fragments": 4,
+    "retries": 10,
+    "merge_output_format": "mp4"
+  },
+  "cookies": {
+    "source": "none",
+    "browser": "chrome",
+    "file_path": "data/cookies.txt"
+  },
   "advanced": {
-    "ffmpeg_location": "bin", "js_runtime": "node", "node_path": "bin/node.exe",
-    "use_nightly_yt_dlp": true, "show_debug_logs": false,
-    "sponsorblock_remove": false, "sponsorblock_categories": ["sponsor"]
+    "show_debug_logs": false,
+    "sponsorblock_remove": false,
+    "sponsorblock_categories": ["sponsor"]
   }
 }
 ```
@@ -349,116 +349,146 @@ class DependencyChecker:
     BIN_DIR: Path = Path(__file__).resolve().parent.parent / "bin"
 
     def check_all(self) -> list[DepResult]
-    def _check_ffmpeg(self) -> DepResult   # bin/ffmpeg.exe → --version
-    def _check_ffprobe(self) -> DepResult  # bin/ffprobe.exe → --version
-    def _check_node(self) -> DepResult     # bin/node.exe → --version (optional)
-    def _check_ytdlp(self) -> DepResult    # import yt_dlp → __version__
+    def _check_ffmpeg(self) -> DepResult   # bin/ffmpeg.exe (or PATH) → -version, required
+    def _check_ffprobe(self) -> DepResult  # bin/ffprobe.exe (or PATH) → -version, required
+    def _check_node(self) -> DepResult     # bin/node.exe (or PATH) → --version, OPTIONAL
+    def _check_ytdlp(self) -> DepResult    # import yt_dlp → yt_dlp.version.__version__, required
 ```
 
-**Note:** `BIN_DIR` uses absolute path (`Path(__file__).resolve()`) to work regardless of CWD.
+**Note 1:** `BIN_DIR` is absolute (`Path(__file__).resolve()`) so it works regardless of CWD.
+
+**Note 2 (v3 correction):** the startup check validates the **Python** `yt_dlp` package, because `info_extractor` imports it. The actual download engine is `bin/yt-dlp.exe`, which is **not** version-checked at startup.
 
 ### 3.10 `core/download_controller.py` — DownloadController
 
 ```python
 class DownloadController:
     def __init__(self, config)
-    def set_app(self, app)              # Sets tk root for after() calls
-    def on(self, event, callback)       # Register event handler
-    def start_download(self, url, opts, save_dir)  # Spawns thread
-    def _download_worker(self, url, opts, save_dir) # yt-dlp in thread
-    def _progress_hook(self, d)         # Puts progress to queue
-    def _get_logger(self)               # Creates UILogger → queue
-    def _poll_queue(self)               # Reads queue every 100ms via after()
-    def cancel(self)                    # Sets stop event + cancels after()
-    def is_downloading(self) -> bool    # Thread alive check
+    def set_app(self, app)                    # tk root for after() scheduling
+    def on(self, event, callback)             # Register event handler
+    def start_download(self, url, opts, save_dir: Path)
+    def start_playlist_download(self, entries: list[dict], opts, save_dir: Path)
+    def _run_single(self, url, opts, save_dir, index=None) -> str
+    def _download_worker(self, url, opts, save_dir)     # spawns _run_single
+    def _playlist_worker(self, entries, opts, save_dir) # iterates items
+    def _poll_queue(self)                     # drains queue every 100ms via after()
+    def cancel(self)                          # stop_event + proc.terminate() + after_cancel
+    def is_downloading(self) -> bool
 ```
+
+**Module-level helpers:** `_strip_ansi`, `_strip_ytdlp_report_suffix`, `_classify_error`, `_parse_progress` (regexes `_PROGRESS_RE`/`_SPEED_RE`/`_ETA_RE`), `_parse_destination`, `_build_argv`.
 
 **Event system:**
 
 | Event | Data | Trigger |
 |---|---|---|
-| `progress` | `dict` (yt-dlp progress hook) | Every fragment chunk |
-| `done` | `None` | Download completed successfully |
-| `error` | `str` (error ID or message) | Any exception in worker |
-| `log` | `str` (log message) | yt-dlp logger output |
+| `progress` | `dict` (percent, speed, eta, filename, index) | `[download]` stdout line |
+| `done` | `None` | Single download returned `"ok"` |
+| `error` | `str` (error ID) | `_run_single` returned non-ok |
+| `log` | `str` (line) | stdout lines: `[...]`→`[INFO]`, `WARNING:`→`[WARN]`, `ERROR:`→`[ERROR]` |
+| `playlist_item` | `dict` (index, id, status, error, position, total) | Each playlist item start/finish |
+| `playlist_done` | `None` | After all playlist items |
 
-**Error mapping in `_download_worker`:**
+**`_run_single` subprocess execution:**
+1. Prepend `ffmpeg_location` to `os.environ["PATH"]`
+2. `subprocess.Popen([bin/yt-dlp.exe, *argv], stdout=PIPE, stderr=STDOUT, text=True, encoding="utf-8", errors="replace")`
+3. Stream `proc.stdout` line by line; stop early if `_stop_event` set
+4. Remember first `ERROR:` line; classify via `_classify_error`
+5. Return `"ok"` (rc=0 + no error), `"cancelled"`, or a classified error ID; `unknown:{e}` on Popen failure
+6. `finally`: `proc.terminate()` if still running
+
+**Error mapping in `_classify_error` (v3):**
+
 ```
-DownloadError
-  ├── "Sign in" or "age" → "age_restricted"
-  ├── "unavailable" → "unavailable"
-  ├── "429" → "rate_limited"
-  ├── "cookie" or "Could not copy" → cookie error (Arabic)
-  └── else → "download_error:{msg}"
-ExtractorError → "extractor:{e}"
-UnsupportedError → "unsupported_url"
-Exception → "unknown:{e}"
+contains "sign in" or "age" → "age_restricted"
+"unavailable"              → "unavailable"
+"429"                      → "rate_limited"
+"cookiefile" / "cookies-from-browser"
+  + Arabic cookie message  → cookie error (Arabic, browser closed message)
+"not supported"/"unsupported"
+  /"no such extractor"     → "unsupported_url"
+"[youtube]" extractor part → "extractor:{msg}"   (suffix stripped)
+otherwise                  → "download_error:{msg}"
 ```
 
 ### 3.11 `core/format_builder.py` — FormatBuilder
 
 ```python
-def build_format_opts(quality: str, mode: str) -> dict
+QUALITY_OPTIONS = ["Best", "2160p", "1440p", "1080p", "720p", "480p", "360p"]
+MODE_OPTIONS   = ["video", "mp4_only", "audio"]
+
+def build_format_opts(quality: str, mode: str, config=None) -> dict
+def _merge_output_format(config) -> str
 def _audio_postprocessors(fmt: str) -> list[dict]
 def get_common_opts(bin_dir: str, config) -> dict
 ```
 
-**`get_common_opts` output:**
+**`get_common_opts` output (verified):**
+
 ```python
 {
-    "ffmpeg_location": str(resolved_bin_dir),
+    "ffmpeg_location": str(Path(bin_dir).resolve()),
     "concurrent_fragments": config.get("download.concurrent_fragments", 4),
     "retries": config.get("download.retries", 10),
     "fragment_retries": config.get("download.retries", 10),
     "throttledratelimit": 102400,
     "format_sort": ["vcodec:h264,vp9,av01", "res", "br"],
     "ignoreerrors": False,
-    "quiet": True,
+    "quiet": False,
     "no_warnings": True,
+    "verbose": bool(config.get("advanced.show_debug_logs", False)),
+    "noplaylist": True,
     "js_runtimes": {"node": {}},
-    "extractor_args": {"youtube-ejs": {}},
+    "extractor_args": {"youtube-ejs": {}},   # merged with advanced.extractor_args
 }
 ```
+Side effect: prepends the resolved `bin/` dir to `os.environ["PATH"]` (so yt-dlp finds `node.exe`/`ffmpeg.exe`).
 
-**`FORMAT_MAP` — Format strings:**
+**`FORMAT_MAP` — video mode format strings:**
+
 ```python
 {
-    "best":   "bv[ext=mp4]+ba[ext=m4a]/bv+ba/b",
-    "2160p":  "bv[height<=2160][ext=mp4]+ba[ext=m4a]/bv[height<=2160]+ba/b[height<=2160]",
-    "1440p":  "bv[height<=1440][ext=mp4]+ba[ext=m4a]/bv[height<=1440]+ba/b[height<=1440]",
-    "1080p":  "bv[height<=1080][ext=mp4]+ba[ext=m4a]/bv[height<=1080]+ba/b[height<=1080]",
-    "720p":   "bv[height<=720][ext=mp4]+ba[ext=m4a]/bv[height<=720]+ba/b[height<=720]",
-    "480p":   "bv[height<=480][ext=mp4]+ba[ext=m4a]/bv[height<=480]+ba/b[height<=480]",
-    "360p":   "bv[height<=360][ext=mp4]+ba[ext=m4a]/bv[height<=360]+ba/b[height<=360]",
-    "mp3":    "m4a/bestaudio/best",
-    "m4a":    "m4a/bestaudio/best",
+    "Best":  "bv[ext=mp4]+ba[ext=m4a]/bv+ba/b",
+    "2160p": "bv[height<=2160][ext=mp4]+ba[ext=m4a]/bv[height<=2160]+ba/b[height<=2160]",
+    "1440p": "bv[height<=1440][ext=mp4]+ba[ext=m4a]/bv[height<=1440]+ba/b[height<=1440]",
+    "1080p": "bv[height<=1080][ext=mp4]+ba[ext=m4a]/bv[height<=1080]+ba/b[height<=1080]",
+    "720p":  "bv[height<=720][ext=mp4]+ba[ext=m4a]/bv[height<=720]+ba/b[height<=720]",
+    "480p":  "bv[height<=480][ext=mp4]+ba[ext=m4a]/bv[height<=480]+ba/b[height<=480]",
+    "360p":  "bv[height<=360][ext=mp4]+ba[ext=m4a]/bv[height<=360]+ba/b[height<=360]",
+    "mp3":   "m4a/bestaudio/best",
+    "m4a":   "m4a/bestaudio/best",
 }
 ```
 
 **`FORMAT_MAP_MP4` — MP4-only mode:**
+
 ```python
 {
-    "best":   "bv[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
-    "2160p":  "bv[height<=2160][ext=mp4]+ba[ext=m4a]/b[height<=2160]",
-    "1440p":  "bv[height<=1440][ext=mp4]+ba[ext=m4a]/b[height<=1440]",
-    "1080p":  "bv[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]",
-    "720p":   "bv[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720]",
-    "480p":   "bv[height<=480][ext=mp4]+ba[ext=m4a]/b[height<=480]",
-    "360p":   "bv[height<=360][ext=mp4]+ba[ext=m4a]/b[height<=360]",
+    "Best":  "bv[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b",
+    "2160p": "bv[height<=2160][ext=mp4]+ba[ext=m4a]/b[height<=2160]",
+    # ... same pattern for 1440p/1080p/720p/480p/360p
 }
 ```
 
+**Mode behavior (`build_format_opts`):**
+- `audio`: format from `FORMAT_MAP` for mp3/m4a; `postprocessors` from `_audio_postprocessors`; `writethumbnail=True`
+- `mp4_only`: format from `FORMAT_MAP_MP4` (no `merge_output_format`; constrained to mp4/m4a already)
+- `video`: format from `FORMAT_MAP` + `merge_output_format` from config (default `"mp4"`)
+
 **Audio postprocessors:**
-- MP3: `FFmpegExtractAudio` (mp3, 192kbps) + `FFmpegMetadata` + `EmbedThumbnail`
+- MP3: `FFmpegExtractAudio(mp3, 192)` + `FFmpegMetadata` + `EmbedThumbnail`
 - M4A: `FFmpegMetadata` + `EmbedThumbnail` (no re-encode)
 
 ### 3.12 `core/info_extractor.py` — InfoExtractor
 
+Uses the **Python** `yt_dlp.YoutubeDL` API with `download=False` (metadata only). Function list:
+
 ```python
-def extract_info(url: str) -> dict | None
-def get_available_qualities(url: str) -> list[str]
+def extract_info(url: str) -> dict | None                    # single video metadata
+def extract_playlist(url: str) -> dict | None                # playlist {id,title,uploader,count,entries:[{index,id,title,...}]}
+def get_available_qualities(url: str) -> list[str]           # ["Best", ...] from available heights
 def extract_thumbnail(info: dict) -> str | None
-def extract_title(info: dict) -> str
+def extract_title(info: dict) -> str                         # info.get("title") or ""
 def extract_duration(info: dict) -> int
 def extract_uploader(info: dict) -> str
 ```
@@ -468,22 +498,21 @@ def extract_uploader(info: dict) -> str
 ```python
 class UILogger:
     def __init__(self, q: queue.Queue)
-    def debug(self, msg)    # Filters out "[debug] " prefixed messages
-    def info(self, msg)     # → ("log", "[INFO] {msg}")
-    def warning(self, msg)  # → ("log", "[WARN] {msg}")
-    def error(self, msg)    # → ("log", "[ERROR] {msg}")
+    def debug(self, msg)    # Skips messages starting with "[debug] "
+    def info(self, msg)     # → ("log", f"[INFO] {msg}")
+    def warning(self, msg)  # → ("log", f"[WARN] {msg}")
+    def error(self, msg)    # → ("log", f"[ERROR] {msg}")
 ```
 
-Implements yt-dlp's logger interface. All messages prefixed with level and put in queue.
+Implements yt-dlp's logger interface. **v3 note:** the parallel subprocess path captures stdout and emits `[INFO]`/`[WARN]`/`[ERROR]` lines directly, so `UILogger` is currently exercised by `tests/test_ui_logger.py` rather than the download path.
 
 ### 3.14 `utils/validators.py` — Validators
 
 ```python
-YOUTUBE_RE = re.compile(...)    # Matches youtube.com, youtu.be, shorts, playlists
-PLAYLIST_RE = re.compile(...)   # Matches list= parameter
-
 def is_valid_youtube_url(url: str) -> bool
-def is_playlist_url(url: str) -> bool
+def is_playlist_url(url: str) -> bool        # list= in URL
+def is_explicit_playlist_url(url: str) -> bool  # standalone list-only URL
+def classify_url(url: str) -> str            # "video" | "playlist" | "invalid"
 def extract_video_id(url: str) -> str | None
 ```
 
@@ -494,6 +523,7 @@ def ensure_dir(path: Path) -> Path
 def open_folder(path: Path)           # os.startfile()
 def get_downloads_dir() -> Path       # ~/Downloads/YTDownloader
 def safe_filename(name: str) -> str   # Removes <>:"/\|?*
+def sanitize_folder_name(name: str) -> str  # Safe Windows folder name for playlists
 ```
 
 ---
@@ -510,62 +540,64 @@ def safe_filename(name: str) -> str   # Removes <>:"/\|?*
 | `ui.window_width` | int | `800` | Initial window width |
 | `ui.window_height` | int | `600` | Initial window height |
 | `download.default_dir` | string | `~/Downloads/YTDownloader` | Default save directory |
-| `download.default_quality` | string | `"1080p"` | `"Best"`, `"2160p"`, ..., `"360p"` |
+| `download.default_quality` | string | `"1080p"` | `"Best"`, `"2160p"` … `"360p"` |
 | `download.default_mode` | string | `"video"` | `"video"`, `"mp4_only"`, `"audio"` |
 | `download.concurrent_fragments` | int | `4` | Parallel fragment downloads |
-| `download.retries` | int | `10` | Download retry count |
-| `download.merge_output_format` | string | `"mp4"` | Container format for merged output |
-| `download.embed_thumbnail` | bool | `false` | Embed thumbnail in video |
-| `download.embed_metadata` | bool | `true` | Embed metadata in video |
-| `download.write_subs` | bool | `false` | Download subtitles |
-| `download.sub_langs` | string | `"ar,en"` | Subtitle languages |
-| `audio.default_format` | string | `"mp3"` | `"mp3"` or `"m4a"` |
-| `audio.mp3_quality` | string | `"192"` | MP3 bitrate: `"128"`, `"192"`, `"320"` |
-| `audio.embed_thumbnail` | bool | `true` | Embed thumbnail in audio |
+| `download.retries` | int | `10` | Download + fragment retries |
+| `download.merge_output_format` | string | `"mp4"` | Container for merged output |
 | `cookies.source` | string | `"none"` | `"none"`, `"browser"`, `"file"` |
 | `cookies.browser` | string | `"chrome"` | `"chrome"`, `"firefox"`, `"edge"`, `"brave"` |
 | `cookies.file_path` | string | `"data/cookies.txt"` | Path to cookies.txt |
-| `advanced.show_debug_logs` | bool | `false` | Show debug-level logs |
+| `advanced.show_debug_logs` | bool | `false` | Pass `--verbose` to yt-dlp |
 | `advanced.sponsorblock_remove` | bool | `false` | Remove sponsor segments |
 | `advanced.sponsorblock_categories` | list | `["sponsor"]` | SponsorBlock categories |
+| `advanced.extractor_args` | dict | `{}` (not in defaults) | Extra `--extractor-args` merged over `{"youtube-ejs": {}}` |
 
 ### 4.2 Config File Location
 
-`data/config.json` (relative to project root / EXE directory)
+`data/config.json` (relative to project root). Created automatically with defaults on first run.
 
 ### 4.3 ConfigManager Deep Merge
 
-When loading a saved config, `ConfigManager._merge()` recursively merges saved values with defaults. Any keys present in defaults but missing in saved config are preserved from defaults. This ensures forward compatibility when new config keys are added.
+`_merge()` recursively combines saved values with `_DEFAULTS` so newly added keys appear with default values even when missing from an older saved file. `reset_to_defaults()` restores factory defaults.
+
+### 4.4 Stale Keys (v3)
+
+On-disk `data/config.json` may still contain obsolete keys from earlier versions (`audio.*`, `download.embed_*`, `download.write_subs`, `download.sub_langs`, `advanced.ffmpeg_location`, `advanced.js_runtime`, `advanced.node_path`, `advanced.use_nightly_yt_dlp`). The code **ignores** them — they can be deleted safely. They are not part of the v3 schema shown above.
 
 ---
 
-## 5. yt-dlp Options Reference
+## 5. yt-dlp CLI Options Reference
 
-### 5.1 All Options Used
+Downloads build a CLI argv (`_build_argv`) and execute `bin/yt-dlp.exe`. This section maps common-options dict keys to the emitted CLI flags.
 
-| Option | Value | Purpose |
+### 5.1 Flags Emitted (verified, `_build_argv` lines 73-184)
+
+| Python opt key | CLI flag | Notes |
 |---|---|---|
-| `format` | See FORMAT_MAP | Quality/format selection |
-| `merge_output_format` | `"mp4"` | Container for merged video+audio |
-| `outtmpl` | `save_dir / "%(title)s [%(id)s].%(ext)s"` | Output file naming |
-| `ffmpeg_location` | `bin/` (absolute) | FFmpeg binary location |
-| `concurrent_fragments` | `4` | Parallel DASH/HLS fragment download |
-| `retries` | `10` | Download retries |
-| `fragment_retries` | `10` | Fragment retries |
-| `throttledratelimit` | `102400` (100 KB/s) | Auto re-extract on throttling |
-| `format_sort` | `["vcodec:h264,vp9,av01", "res", "br"]` | Codec preference |
-| `js_runtimes` | `{"node": {}}` | Node.js for JS challenges |
-| `extractor_args` | `{"youtube-ejs": {}}` | YouTube EJS extractor |
-| `cookiesfrombrowser` | `("chrome",)` etc. | Browser cookie import |
-| `cookiefile` | `data/cookies.txt` | Cookies file path |
-| `sponsorblock_remove` | `["sponsor"]` etc. | SponsorBlock filtering |
-| `writethumbnail` | `True` | Save thumbnail for audio embedding |
-| `postprocessors` | See 3.11 | Audio extraction, metadata, thumbnail |
-| `progress_hooks` | `[callback]` | Real-time progress updates |
-| `logger` | `UILogger` instance | Thread-safe log capture |
-| `ignoreerrors` | `False` | Stop on first error |
-| `quiet` | `True` | Reduce console output |
-| `no_warnings` | `True` | Suppress warnings in console |
+| `format` | `-f <fmt>` | From `FORMAT_MAP` / `FORMAT_MAP_MP4` |
+| `postprocessors[FFmpegExtractAudio]` | `-x --audio-format <codec>` (+ `--audio-quality <q>` if set) | e.g. mp3 + 192 |
+| `postprocessors[FFmpegMetadata]` | `--add-metadata` | |
+| `postprocessors[EmbedThumbnail]` | `--embed-thumbnail` | |
+| `writethumbnail` | `--write-thumbnail` | Audio mode |
+| `merge_output_format` | `--merge-output-format mp4` | Video mode |
+| `noplaylist` | `--no-playlist` | Always set |
+| `ffmpeg_location` | `--ffmpeg-location <dir>` | |
+| `concurrent_fragments` | `--concurrent-fragments <n>` | Default 4 |
+| `retries` | `--retries <n>` | Default 10 |
+| `fragment_retries` | `--fragment-retries <n>` | Default 10 |
+| `throttledratelimit` | `--throttled-rate 102400` | 100 KB/s throttle re-extract |
+| `format_sort` | `--format-sort vcodec:h264,vp9,av01,res,br` | Joined with `,` |
+| `js_runtimes` | `--js-runtimes node:<bin>/node.exe` | Node.js for JS challenges |
+| `extractor_args` | `--extractor-args <key>:<k=v;...>` | `youtube-ejs` |
+| `cookiesfrombrowser` | `--cookies-from-browser chrome` | Browser cookie import |
+| `cookiefile` | `--cookies <path>` | cookies.txt |
+| `sponsorblock_remove` | `--sponsorblock-remove sponsor` (or configured cats) | |
+| `outtmpl` (or default) | `-o "<save_dir>/%(title)s [%(id)s].%(ext)s"` | |
+| `quiet` | `--quiet` | Default False → NOT passed |
+| `no_warnings` | `--no-warnings` | Default True |
+| `verbose` | `--verbose` | Only when `advanced.show_debug_logs` |
+| — | `--newline --progress` then `<url>` | Always last |
 
 ### 5.2 Format String Reference
 
@@ -575,32 +607,38 @@ yt-dlp format string syntax used:
 |---|---|
 | `bv` | Best video-only stream |
 | `ba` | Best audio-only stream |
-| `*` | Allow multiple (use best of available) |
 | `+` | Download separately then merge |
 | `/` | Fallback chain (try left first) |
 | `[ext=mp4]` | Filter by container extension |
 | `[height<=1080]` | Filter by max height |
 | `b` | Best combined (video+audio) stream |
 
-### 5.3 format_sort Reference
+### 5.3 `format_sort` Reference
 
 ```python
 ["vcodec:h264,vp9,av01", "res", "br"]
 ```
 
-This is a list of sort keys. Each key is a field name with optional value ordering:
+- `vcodec:h264,vp9,av01` — prefer H.264, then VP9, then AV01
+- `res` — higher resolution first
+- `br` — higher bitrate first
 
-- `vcodec:h264,vp9,av01` — Sort by video codec: prefer H.264 first, then VP9, then AV01
-- `res` — Sort by resolution (higher is better)
-- `br` — Sort by bitrate (higher is better)
+### 5.4 `throttledratelimit` Reference
 
-### 5.4 throttledratelimit Reference
+`102400` bytes/sec (100 KB/s). When yt-dlp detects download speed persistently below this threshold it re-extracts fresh URLs — typically recovering from ~50 KB/s back to 1-5 MB/s.
 
-```python
-"throttledratelimit": 102400  # 100 KB/s in bytes/sec
+### 5.5 Stdout Parsing
+
+`_parse_progress` (regexes in `download_controller.py:9-12`):
+
+```
+_ANSI_RE     = \x1b\[[0-9;]*m            (strip ANSI color codes)
+_PROGRESS_RE = \[download\]\s+([\d.]+)%   → percent
+_SPEED_RE    = \bat\s+([^\s]+)\s+ETA       → speed
+_ETA_RE      = ETA\s+([^\s)]+)             → ETA
 ```
 
-When yt-dlp detects download speed consistently below this threshold, it assumes YouTube is throttling the connection and automatically re-extracts the video info to get fresh URLs. This typically recovers speed from ~50 KB/s back to 1-5 MB/s within seconds.
+Lines matching `[download] ...%` become `progress` events; a destination line (`[download] Destination: <path>`) sets the current filename.
 
 ---
 
@@ -612,232 +650,184 @@ When yt-dlp detects download speed consistently below this threshold, it assumes
 [User runs python app.py]
     │
     ▼
-app.py: os.environ["PATH"] += PROJECT_ROOT / "bin"
+app.py (L11): PATH = bin + PATH   (before all imports)
     │
     ▼
-app.py: ConfigManager.__init__() → loads data/config.json
+app.py (L20): ConfigManager() → loads data/config.json (deep-merges defaults)
     │
     ▼
-app.py: ctk.set_appearance_mode(theme)
+app.py (L22): ctk.set_appearance_mode(theme)
     │
     ▼
-app.py: ctk.CTk() → root window (800x600, min 700x500)
+app.py (L24-34): ctk.CTk() root; title; geometry(config size); minsize(700,500); iconbitmap
     │
     ▼
-app.py: StartupCheckFrame(root, on_startup_done)
-    │
-    ├── StartupCheckFrame.__init__()
-    │   ├── Builds UI (title, status_frame, action_frame)
-    │   └── _run_checks()
-    │       ├── DependencyChecker.check_all()
-    │       │   ├── _check_ffmpeg() → bin/ffmpeg.exe --version
-    │       │   ├── _check_ffprobe() → bin/ffprobe.exe --version
-    │       │   ├── _check_node() → bin/node.exe --version
-    │       │   └── _check_ytdlp() → import yt_dlp
-    │       ├── _display_results(results) → update UI with ✅/❌/⚠️
-    │       └── Enable "Continue" button
+app.py (L41): StartupCheckFrame(root, on_startup_done)
+    │   ├── _run_checks():
+    │   │   ├── _check_ffmpeg   → bin/ffmpeg.exe --version   (required)
+    │   │   ├── _check_ffprobe  → bin/ffprobe.exe --version  (required)
+    │   │   ├── _check_node     → bin/node.exe --version     (optional)
+    │   │   └── _check_ytdlp    → import yt_dlp → __version__ (required)
+    │   ├── _display_results() → ✅/❌ rows + versions
+    │   └── enable "Continue"
     │
     ▼
-[User clicks "Continue"]
-    │
-    ├── _on_continue()
-    │   ├── Disable button
-    │   ├── Call on_done → app.py creates MainWindow(root, config)
-    │   └── Destroy StartupCheckFrame
+[User clicks Continue]
+    ├── _on_continue() → on_done → app.py creates MainWindow(root, config)
+    └── Destroy StartupCheckFrame
     │
     ▼
-MainWindow.__init__(root, config)
-    ├── _build_ui() → URL input, info display, quality selector,
-    │                  directory picker, action buttons, progress bar, logs
-    ├── _setup_callbacks() → wire DownloadController events
-    └── _load_config_state() → restore saved directory
+MainWindow.__init__ → _build_ui → _setup_callbacks → _load_config_state
     │
     ▼
-app.py: root.mainloop() → event loop starts
+app.py (L42): root.mainloop()
 ```
 
-### 6.2 Download Flow
+### 6.2 Info Fetch / Playlist Fetch Flow
 
 ```
-[User pastes URL → auto-validate]
+[Paste URL → _on_url_change validates + toggles Fetch]
     │
     ▼
-[User clicks "Fetch Info"]
-    │
-    ├── MainWindow._fetch_info()
-    │   ├── Disable fetch button, show "Fetching..."
-    │   ├── Thread(target=fetch, daemon=True).start()
-    │   │   └── InfoExtractor.extract_info(url)
-    │   │       ├── yt_dlp.YoutubeDL(quiet=True, ffmpeg_location=...)
-    │   │       ├── ydl.extract_info(url, download=False)
-    │   │       └── ydl.sanitize_info(info)
-    │   └── self.after(0, self._display_info, info)  # Back to main thread
-    │
-    ▼
-MainWindow._display_info(info)
-    ├── Title label: "🎬 {title}"
-    ├── Info label: "Channel: {uploader}\nDuration: {m}:{s}"
-    ├── QualitySelector.set_qualities() → update dropdown
-    ├── Thumbnail: Thread(target=load_thumbnail).start()
-    └── Enable "⬇ Download" button
+MainWindow._fetch_info()  [short-lived daemon thread]
+    └── URL is playlist?  → InfoExtractor.extract_playlist(url)
+    │       ├── fill PlaylistPanel entries (checkbox rows, thumbnails, badges)
+    │       └── _set_playlist_layout_active(True)  → playlist row weight 2
+    └── else              → InfoExtractor.extract_info(url)
+            ├── _display_info: title/thumbnail/channel/duration
+            └── QualitySelector.set_qualities(available)
+```
+
+### 6.3 Single Download Flow
+
+```
+[User clicks Download]
     │
     ▼
-[User selects quality/mode/save dir → clicks "⬇ Download"]
+MainWindow._start_download()
+    ├── opts = FormatBuilder.get_common_opts("bin", config)
+    ├── opts.update(FormatBuilder.build_format_opts(quality, mode, config))
+    ├── cookies: browser → opts["cookiesfrombrowser"]; file → opts["cookiefile"]
+    ├── sponsorblock if configured (advanced.sponsorblock_remove)
+    └── DownloadController.start_download(url, opts, save_dir)
     │
-    ├── MainWindow._start_download()
-    │   ├── Build save_dir = Path(dir_var) / "downloads"
-    │   ├── quality = QualitySelector.quality
-    │   ├── mode = QualitySelector.mode
-    │   ├── base_opts = FormatBuilder.get_common_opts("bin", config)
-    │   ├── format_opts = FormatBuilder.build_format_opts(quality, mode)
-    │   ├── opts = {**base_opts, **format_opts}
-    │   ├── Add cookies: browser import or file
-    │   ├── Add sponsorblock if configured
-    │   ├── Reset UI, disable buttons
-    │   └── DownloadController.start_download(url, opts, save_dir)
+    ▼  [download thread]
+DownloadController._download_worker
+    └── _run_single(url, opts, save_dir)
+        ├── PATH += ffmpeg_location
+        ├── argv = _build_argv(opts, url, save_dir)
+        ├── proc = Popen([bin/yt-dlp.exe, *argv], stdout=PIPE, stderr=STDOUT, ...)
+        ├── for line in proc.stdout:
+        │   ├── "ERROR:"  → first_error + ("log", "[ERROR] ...")
+        │   ├── "WARNING:"→ ("log", "[WARN] ...")
+        │   ├── Destination → current filename
+        │   ├── [download]% → ("progress", {...}) via _parse_progress
+        │   └── "[..."     → ("log", "[INFO] ...")
+        ├── on stop_event → proc.terminate() → "cancelled"
+        └── rc==0 and no error → "ok"  else classified error
+    ├── result "ok"   → ("done", None)
+    └── else          → ("error", result)
     │
-    ▼
-DownloadController.start_download(url, opts, save_dir)
-    ├── _stop_event.clear()
-    ├── _thread = Thread(target=_download_worker, daemon=True)
-    ├── _thread.start()
-    └── _poll_queue()
-    │
-    ├── (on main thread, via app.after(100, _poll_queue))
-    │
-    ▼
-DownloadController._download_worker(url, opts, save_dir)  [THREAD]
-    ├── opts["progress_hooks"] = [self._progress_hook]
-    ├── opts["logger"] = UILogger(self._queue)
-    ├── opts["outtmpl"] = str(save_dir / "%(title)s [%(id)s].%(ext)s")
-    │
-    ├── with YoutubeDL(opts) as ydl:
-    │   ├── ydl.download([url])
-    │   │   ├── yt-dlp extracts video info
-    │   │   ├── yt-dlp-ejs solves JS challenges via node.exe
-    │   │   ├── Downloads video fragment (e.g., f137.mp4)
-    │   │   │   └── progress_hook fires every chunk → queue.put(("progress", d))
-    │   │   ├── Downloads audio fragment (e.g., f140.m4a)
-    │   │   │   └── progress_hook fires every chunk → queue.put(("progress", d))
-    │   │   ├── FFmpeg merges → final .mp4
-    │   │   └── Post-processors: metadata, thumbnail
-    │   │
-    │   └── self._queue.put(("done", None))
-    │
-    ├── OR on exception:
-    │   ├── DownloadError → map to error ID → queue.put(("error", id))
-    │   ├── ExtractorError → queue.put(("error", f"extractor:{e}"))
-    │   ├── UnsupportedError → queue.put(("error", "unsupported_url"))
-    │   └── Exception → queue.put(("error", f"unknown:{e}"))
+    ▼  [main thread, _poll_queue every 100ms]
+    ├── progress → ProgressWidget.update_progress
+    ├── done     → reset UI, enable folder/settings; ProgressWidget.set_done
+    ├── error    → ProgressWidget.set_error + Arabic message; reset UI
+    └── log      → LogsPanel.append_log
+```
+
+### 6.4 Playlist Download Flow
+
+```
+[User clicks Download All / Download Selected]
     │
     ▼
-DownloadController._poll_queue()  [MAIN THREAD, every 100ms]
-    ├── while True: queue.get_nowait()
-    │   ├── ("progress", d) → ProgressWidget.update_progress(d)
-    │   ├── ("done", None)  → MainWindow.on_done callback
-    │   │   ├── ProgressWidget.set_done()
-    │   │   ├── Reset buttons to normal state
-    │   │   └── Enable "📂 Open Folder"
-    │   ├── ("error", msg)  → MainWindow.on_error callback
-    │   │   ├── ProgressWidget.set_error(msg)
-    │   │   ├── Reset buttons
-    │   │   └── Log error message
-    │   └── ("log", msg)    → LogsPanel.append_log(msg)
+MainWindow._start_playlist_download(entries)
+    └── DownloadController.start_playlist_download(entries, opts, save_dir)
     │
-    └── app.after(100, self._poll_queue)  # Schedule next poll
+    ▼  [playlist thread]
+_playlist_worker
+    ├── for each entry (position/total):
+    │   ├── ("playlist_item", {status:"downloading", ...})
+    │   ├── item_url = entry.url or watch?v=<id>
+    │   ├── result = _run_single(item_url, opts, save_dir, index=index)
+    │   └── ("playlist_item", {status:"completed"|"failed", error, ...})
+    └── ("playlist_done", None)
 ```
 
 ---
 
 ## 7. Threading Model
 
-### 7.1 Thread Diagram
+### 7.1 Threads
 
-```
-MAIN THREAD                        DOWNLOAD THREAD
-─────────────                      ──────────────
-    │                                      │
-    │  MainWindow runs here                │
-    │  tkinter mainloop                    │
-    │                                      │
-    │  _poll_queue() ◄── every 100ms ──┐   │
-    │      │                           │   │
-    │      ├── progress ──────────────►│   │  yt-dlp downloads
-    │      ├── log ───────────────────►│   │  chunks → progress
-    │      ├── done ──────────────────►│   │  hook fires
-    │      └── error ─────────────────►│   │
-    │                                  │   │
-    │  SettingsDialog (modal)          │   │
-    │  File dialogs                    │   │
-    │                                  │   │
-    │  _fetch_info() spawns            │   │
-    │  short-lived thread for info     │   │
-    │  extraction (not shown)          │   │
-    │                                  │   │
-```
+| Thread | Lives In | Purpose |
+|---|---|---|
+| Main thread | UI | tkinter mainloop; `_poll_queue` every 100ms via `after()` |
+| Info/playlist fetch | short `daemon` thread | `extract_info` / `extract_playlist` (Python API, `download=False`) |
+| Download thread | `daemon` thread | `_run_single` → `subprocess.Popen` of `bin/yt-dlp.exe` |
+| Playlist thread | `daemon` thread | Iterates items, calls `_run_single` per item |
 
 ### 7.2 Thread Safety Rules
 
 1. **UI objects** (`CTk*`, `tk.*`) — created and modified ONLY in main thread
-2. **yt-dlp** — runs ONLY in download thread (it blocks)
-3. **Queue** — only shared mutable state between threads (thread-safe)
+2. **`subprocess.Popen`** — runs ONLY in download/playlist thread
+3. **Queue** — the only shared mutable state between threads (thread-safe)
 4. **Config** — read-only during download (safe to read from any thread)
-5. **Stop event** — `threading.Event`, set from main thread, checked in download thread (not currently used, but available)
+5. **Stop event** — `threading.Event`, set from main thread, checked in `_run_single`'s stdout loop and in workers
 
 ### 7.3 Queue Protocol
 
 ```python
-# Producer (download thread) → queue.put():
-queue.put(("progress", progress_dict))   # yt-dlp progress hook data
-queue.put(("done", None))                # Download completed
-queue.put(("error", error_string))        # Download failed
-queue.put(("log", log_string))            # yt-dlp log message
+# Producer (worker threads):
+queue.put(("progress", dict))       # parsed [download] line (+ filename, optional index)
+queue.put(("done", None))           # single download succeeded
+queue.put(("error", str))           # classified error ID
+queue.put(("log", str))             # log line (already level-prefixed)
+queue.put(("playlist_item", dict))  # per-item status
+queue.put(("playlist_done", None))  # all items finished
 
-# Consumer (main thread) → queue.get_nowait():
+# Consumer (main thread, every 100ms via root.after):
 event, data = queue.get_nowait()
 ```
 
 ### 7.4 Cancellation
 
-The `cancel()` method:
-1. Sets `_stop_event` (for future use with periodic checks)
-2. Cancels the `after()` callback via `app.after_cancel(_after_id)`
-3. UI resets to ready state
-
-**Note:** yt-dlp doesn't support clean cancellation mid-download. The download thread continues but produces an incomplete file. The `_stop_event` is available for future implementation of fragment-level cancellation.
+`cancel()` (download_controller.py:400):
+1. `self._stop_event.set()`
+2. `self._proc.terminate()` if a process is running (pcancel mid-`subprocess`; the process is killed so no incomplete merge)
+3. `app.after_cancel(self._after_id)` stops the next poll
+4. UI resets to ready state; worker posts `"cancelled"` and returns without `done`/`error`
 
 ---
 
 ## 8. Error Handling
 
-### 8.1 Error Catalog
+### 8.1 Error Catalog (v3)
 
-| Error ID | Condition | User Message | User Action |
-|---|---|---|---|---|
-| `age_restricted` | "Sign in" or "age" in DownloadError | "Login required — use cookies" | Enable cookies in Settings |
-| `unavailable` | "unavailable" in DownloadError | "Video is unavailable or deleted" | Check URL validity |
-| `rate_limited` | "429" in DownloadError | "Too many requests — retrying..." | Wait before retrying |
-| `cookie_error` | "cookie" or "Could not copy" | "Failed to extract cookies — close the browser" | Close browser or switch source |
-| `extractor:{e}` | ExtractorError raised | "Video extraction error — update yt-dlp" | Run pip update |
-| `unsupported_url` | UnsupportedError raised | "This URL is not supported" | Check URL format |
-| `download_error:{msg}` | Other DownloadError | "Download error: {msg}" | Check logs |
-| `unknown:{e}` | Unhandled Python exception | "An unexpected error occurred" | Report to developer |
+| Error ID | Condition (message contains) | User Message | User Action |
+|---|---|---|---|
+| `age_restricted` | `"sign in"` or `"age"` + `[youtube]` | Login required — enable cookies | Settings → Advanced → cookies |
+| `unavailable` | `"unavailable"` | Video unavailable or deleted | Check URL validity |
+| `rate_limited` | `"429"` | Rate limited — retry after a pause | Wait, then retry |
+| cookie error | `cookiefile`/`cookies-from-browser` handling | Arabic: "فشل استخراج cookies من المتصفح — أغلق المتصفح أو استخدم ملف cookies في الإعدادات" | Close browser or switch to cookies file |
+| `unsupported_url` | `"not supported"` / `"unsupported"` / `"no such extractor"` | This URL is not supported | Check URL format |
+| `extractor:{msg}` | `[youtube]` extractor error | Extraction error (report suffix stripped) | Update yt-dlp / try later |
+| `download_error:{msg}` | any other `ERROR:` line | Download error with details | Check logs |
+| `unknown:{e}` | Popen/exception path | Unknown error | Report to developer |
 
-### 8.2 Log Levels
+Map `_classify_error` (download_controller.py:26), suffix stripper `_strip_ytdlp_report_suffix` (line 19).
 
-| Prefix | Source | Color |
-|---|---|---|
-| `[INFO]` | UILogger.info() / filtered debug | None |
-| `[WARN]` | UILogger.warning() | None |
-| `[ERROR]` | UILogger.error() / error events | None |
+### 8.2 Log Line Levels
 
-### 8.3 yt-dlp Error Handling Strategy
+| Prefix | Source |
+|---|---|
+| `[INFO]` | stdout lines starting with `[` (e.g. `[download]`, `[youtube]`) |
+| `[WARN]` | stdout lines starting with `WARNING:` |
+| `[ERROR]` | stdout lines starting with `ERROR:` |
 
-The `_download_worker` catches specific yt-dlp exceptions:
-- `DownloadError` — Wraps all download failures (HTTP errors, network issues, etc.)
-- `ExtractorError` — Video extraction failures (YouTube API changes)
-- `UnsupportedError` — Non-YouTube URLs or invalid URLs
-- `GeoRestrictedError` — Available for future use
+### 8.3 Strategy
+
+Because downloads are a subprocess, yt-dlp exceptions cannot propagate into Python. All failure modes surface as `ERROR:` lines on stdout, captured verbatim and classified to a stable error ID. This eliminates the old `DownloadError`/`ExtractorError`/`UnsupportedError` exception branches (removed in the v3 engine rewrite).
 
 ---
 
@@ -846,66 +836,49 @@ The `_download_worker` catches specific yt-dlp exceptions:
 ### 9.1 Development Setup
 
 ```powershell
-# Prerequisites
 pip install -r requirements.txt
-
-# Verify
 python -c "import yt_dlp; import customtkinter; print('OK')"
-python -c "import yt_dlp_ejs; print(f'yt-dlp-ejs: OK')"
 
 # Run
 python app.py
 ```
 
-### 9.2 Production Build
+### 9.2 Production Build (Planned)
+
+There is **no `build.spec`** in the repository yet — the PyInstaller build is planned, not shipped. Intended command:
 
 ```powershell
 pip install pyinstaller
-pyinstaller build.spec --clean
+pyinstaller --onedir --noconsole --name YTDownloader --icon assets/logo.ico app.py
 # Output: dist/YTDownloader/
 ```
 
-**Build output structure:**
+**Expected structure:**
 ```
 dist/YTDownloader/
-├── YTDownloader.exe          ← Main executable
-├── base_library.zip
-├── python3*.dll
-├── *.pyd                     ← Compiled Python modules
-├── bin/                      ← Binaries
-│   ├── ffmpeg.exe
-│   ├── ffprobe.exe
-│   ├── node.exe
-│   └── yt-dlp.exe
-├── core/                     ← Core modules
-├── ui/                       ← UI modules
-├── utils/                    ← Utility modules
-├── assets/                   ← Icons, fonts
-└── data/                     ← Runtime data (created on first run)
+├── YTDownloader.exe          ← Main executable (no console)
+├── _internal/                ← PyInstaller bundles Python + packages
+├── bin/                      ← Hand-shipped binaries
+│   ├── ffmpeg.exe  ffprobe.exe  node.exe  yt-dlp.exe
+├── assets/
+│   └── logo.ico
+└── data/                     ← Created at first run (config.json)
 ```
 
-### 9.3 PyInstaller Spec Details
+**Build considerations (from verified code):**
+- The engine launches `bin/yt-dlp.exe` by path (`_exe_path` resolves `bin/` next to the source), so `bin/` must sit next to the executable in the distribution
+- `app.py` prepends `PROJECT_ROOT / "bin"` to `PATH` before imports (node.exe for yt-dlp-ejs)
+- `data/config.json` is written relative to the CWD (`Path("data/config.json")`) — run from the EXE's folder, or a launcher script should set CWD
+- `dep_checker.BIN_DIR` is absolute (`Path(__file__).resolve().parent.parent / "bin"`) — works from any CWD
+- `yt-dlp-ejs` is a **plugin** (loaded by the yt-dlp binary from its own plugin paths), not imported by Python — ensure it is installed into the same environment/plugin dir as the download engine
 
-```python
-# build.spec key aspects:
-Analysis:
-  - binaries: ffmpeg.exe, ffprobe.exe, node.exe (→ bin/)
-  - datas: assets/, ui/, core/
-  - hiddenimports: yt_dlp, yt_dlp.extractor, yt_dlp.extractor.youtube,
-                   yt_dlp.postprocessor, customtkinter
-EXE:
-  - console: False (no terminal window)
-  - icon: assets/logo.ico
-  - onedir (not onefile)
-```
+### 9.3 Distribution
 
-### 9.4 Distribution
+1. Build with PyInstaller `--onedir`
+2. Copy `bin/`, `assets/`, and `data/` (template) next to the EXE
+3. Zip `dist/YTDownloader/`; user unzips and runs `YTDownloader.exe`
 
-1. Build with `pyinstaller build.spec --clean`
-2. Zip the `dist/YTDownloader/` folder
-3. User unzips and runs `YTDownloader.exe`
-
-**Expected size:** < 150 MB (includes ffmpeg ~80MB + node.exe ~50MB)
+**Expected size:** < 150 MB (includes ffmpeg ~80MB + node.exe ~50MB + yt-dlp.exe)
 
 ---
 
@@ -913,86 +886,82 @@ EXE:
 
 ### 10.1 Adding a New Feature
 
-1. **UI component** → Add new file in `ui/` or extend existing widget
-2. **Core logic** → Add new file in `core/` or extend existing controller
-3. **Utility** → Add new file in `utils/`
+1. **UI component** → Add file in `ui/` or extend an existing widget
+2. **Core logic** → Add file in `core/` or extend the controller/format builder
+3. **Utility** → Add file in `utils/`
 4. **Config** → Add defaults in `config_manager.py._DEFAULTS`
-5. **PRD** → Update `PRD_YTDownloader_v2.md`
-6. **Connect** → Wire UI events to controller in `main_window.py`
+5. **PRD** → Update `docx/PRD_YTDownloader_v3.md`
+6. **Reference** → Update `docx/PROJECT_REFERENCE.md` (keep in sync)
+7. **Connect** → Wire UI events to the controller in `main_window.py`
+8. **Tests** → Add/update `tests/` (see §11) and run pytest
 
 ### 10.2 Code Style
 
-- Type hints for all function signatures
+- Type hints on all function signatures
 - Arabic UI strings (no hardcoded English in UI code)
-- Docstrings in Arabic for user-facing methods, English for technical
-- `snake_case` for functions/variables, `PascalCase` for classes
-- Constants in `UPPER_CASE`
+- Module-level constants in `UPPER_CASE`; `snake_case` functions/variables; `PascalCase` classes
+- Config read through `ConfigManager.get("dot.notation")`
 
-### 10.3 Testing
+### 10.3 Verification Checklist
 
-Current testing approach: manual (run app and test features)
+Run before finishing any change:
 
-Recommended test scenarios:
-1. **Basic download**: Paste valid YouTube URL → fetch info → download → verify file
-2. **Audio only**: Switch to audio mode → download MP3 → verify .mp3 file
-3. **Quality selection**: Test each quality level → verify resolution
-4. **Throttling**: Download large video → verify speed recovery
-5. **Cookies**: Enable browser cookies → test age-restricted content
-6. **Invalid URL**: Paste garbage text → verify error handling
-7. **Cancel**: Start download → click cancel → verify clean state
-8. **Settings**: Change all settings → restart → verify persistence
+```powershell
+pytest tests/ -q
+ruff check core/ utils/ ui/ tests/
+```
 
 ---
 
-## 11. Testing Scenarios
+## 11. Testing
 
-### 11.1 Unit Test Candidates
+The project has a **pytest suite** (currently **272 passing tests**, ruff clean). `tests/conftest.py` stubs `customtkinter`/tkinter and `yt_dlp` so UI/controller logic can be tested headlessly.
 
-| Module | Test | Expected |
-|---|---|---|
-| `validators.py` | `is_valid_youtube_url("https://youtube.com/watch?v=xyz")` | `True` |
-| `validators.py` | `is_valid_youtube_url("not a url")` | `False` |
-| `validators.py` | `extract_video_id("https://youtu.be/abc123def45")` | `"abc123def45"` |
-| `file_utils.py` | `safe_filename('file:<>"name')` | `'file____name'` |
-| `config_manager.py` | `get("download.default_quality")` | `"1080p"` |
-| `config_manager.py` | `set("test.key", "val"); get("test.key")` | `"val"` |
-| `format_builder.py` | `build_format_opts("1080p", "video")["format"]` | Contains `"mp4"` |
-| `format_builder.py` | `build_format_opts("mp3", "audio")["postprocessors"]` | Contains FFmpegExtractAudio |
+| File | Focus |
+|---|---|
+| `test_validators.py` | URL validation, playlist/video/invalid classification, video id extraction |
+| `test_file_utils.py` | `safe_filename`, `sanitize_folder_name`, `get_downloads_dir`, `ensure_dir` |
+| `test_config_manager.py` | Defaults, deep merge, get/set, reset |
+| `test_format_builder.py` | `build_format_opts` for video/mp4_only/audio, `get_common_opts`, maps |
+| `test_download_controller.py` | argv building, stdout parsing (progress/speed/ETA), error classification, cancel, single + playlist worker flows |
+| `test_dep_checker.py` | Check results under mocked binaries (missing/found/paths) |
+| `test_info_extractor.py` | Metadata extraction incl. `None`-safe defaults |
+| `test_progress_widget.py` | Percent math / string fallback |
+| `test_settings_flow.py` | Settings dialog ↔ config round-trip |
+| `test_playlist_panel.py` | Playlist row model, select all, selections → entries |
+| `test_ui_logger.py` | UILogger queue protocol + debug filter |
 
-### 11.2 Integration Test
+### Manual Smoke Test
 
-Full download flow:
-1. Launch app
-2. Verify startup check passes
-3. Paste: `https://www.youtube.com/watch?v=dQw4w9WgXcQ`
-4. Click "Fetch Info" → verify title appears
-5. Select "1080p" + "video"
-6. Click "⬇ Download"
-7. Wait for completion
-8. Verify `downloads/Rick Astley - Never Gonna Give You Up [...].mp4` exists
-9. Verify file plays in media player
+1. Launch app → startup check passes (FFmpeg, FFprobe, Node.js, yt-dlp)
+2. Paste a valid YouTube URL → Fetch → title/thumbnail/qualities appear
+3. Download 1080p video into the chosen save dir → file `<title> [<id>].mp4`
+4. Switch to audio mode → download MP3 192kbps
+5. Paste a playlist URL → PlaylistPanel shows items → Download Selected → watch per-item progress
+6. Start a download → Cancel → clean reset, no orphan process
+7. Settings → change theme/quality → restart → verify persistence
 
 ---
 
 ## 12. Dependencies
 
-### 12.1 Python Packages
+### 12.1 Python Packages (`requirements.txt` — all used)
 
 ```
-yt-dlp[default]>=2025.1.1   # Download engine
-yt-dlp-ejs>=0.8.0            # JavaScript runtime for YouTube challenges
-customtkinter>=5.2.0          # Modern tkinter widgets
+yt-dlp[default]>=2025.1.1   # Download engine + info extraction (yt_dlp package)
+yt-dlp-ejs>=0.8.0            # yt-dlp plugin (JS challenge solver) — NOT Python-imported
+customtkinter>=5.2.0          # GUI widgets
 Pillow>=10.0.0                # Image processing (thumbnails)
 requests>=2.31.0              # HTTP client (thumbnail download)
 ```
 
-### 12.2 External Binaries
+### 12.2 External Binaries (`bin/`)
 
 ```
-bin/ffmpeg.exe      # ~70MB — Video/audio merging, extraction, metadata
-bin/ffprobe.exe     # ~10MB — Media file probing
-bin/node.exe        # ~45MB — JavaScript runtime for yt-dlp-ejs
-bin/yt-dlp.exe      # ~15MB — CLI version (for auto-update, unused directly)
+bin/ffmpeg.exe      # Video/audio merging, extraction, metadata (required)
+bin/ffprobe.exe     # Media file probing (required — checked at startup)
+bin/node.exe        # JavaScript runtime for yt-dlp-ejs (OPTIONAL — auto-solved otherwise)
+bin/yt-dlp.exe      # The download engine — run as a subprocess for every download
 ```
 
 ### 12.3 Runtime Requirements
@@ -1007,20 +976,33 @@ bin/yt-dlp.exe      # ~15MB — CLI version (for auto-update, unused directly)
 
 ## 13. Appendix: Complete Change Log
 
-### v2.0 Initial Implementation → Current (May 2026)
+### v3.0 (Sep 2026) — Subprocess engine + docs corrections
 
-| Date | Change | Files Affected |
-|---|---|---|
-| May 2026 | **Single-Root Architecture**: Changed from multi-CTk to single CTk root with CTkFrame screens | `app.py`, `ui/main_window.py`, `ui/startup_check.py` |
-| May 2026 | **CTkSeparator → tk.Frame**: Replaced unavailable `CTkSeparator` with `tk.Frame(height=1)` | `ui/main_window.py` |
-| May 2026 | **format_sort**: Added codec preference H.264 > VP9 > AV01 | `core/format_builder.py` |
-| May 2026 | **throttledratelimit**: Added 100 KB/s throttle detection | `core/format_builder.py` |
-| May 2026 | **yt-dlp-ejs**: Enabled via `js_runtimes` and `extractor_args` | `core/format_builder.py`, `requirements.txt` |
-| May 2026 | **PATH at startup**: Added `bin/` to PATH before all imports | `app.py` |
-| May 2026 | **Cookie default**: Changed from `"browser"` to `"none"` | `core/config_manager.py` |
-| May 2026 | **Cookie error handling**: Added Arabic error message for Chrome DB lock | `core/download_controller.py` |
-| May 2026 | **DepChecker absolute paths**: `BIN_DIR` uses `Path(__file__).resolve()` | `core/dep_checker.py` |
-| May 2026 | **FFprobe check added**: Missing in original PRD | `core/dep_checker.py` |
-| May 2026 | **Node.js optional**: Changed from `required=True` to `required=False` | `core/dep_checker.py` |
-| May 2026 | **Format map update**: Prioritize `mp4+m4a` in all format strings | `core/format_builder.py` |
-| May 2026 | **Startup check synchronous**: Removed threading from startup check | `ui/startup_check.py` |
+| Change | Files |
+|---|---|
+| **Download engine switched to subprocess**: `bin/yt-dlp.exe` runs with built CLI argv; stdout parsed by regex (`_ANSI_RE`, `_PROGRESS_RE`, `_SPEED_RE`, `_ETA_RE`); old `DownloadError`/`ExtractorError`/`UnsupportedError` exception branches removed | `core/download_controller.py` |
+| **Real cancellation**: `cancel()` = stop_event + `proc.terminate()` (was best-effort with Python API) | `core/download_controller.py` |
+| **Playlist downloads in-app**: PlaylistPanel item rows; `start_playlist_download` + `playlist_item`/`playlist_done` events | `ui/main_window.py`, `ui/playlist_panel.py`, `core/download_controller.py` |
+| **Settings dialog 3 tabs** (no audio tab — format selected in main window) | `ui/settings_dialog.py`, `ui/quality_selector.py` |
+| **Config schema corrected**: stale keys removed from docs (`audio.*`, `download.embed_*`, `advanced.ffmpeg_location/js_runtime/node_path/use_nightly_yt_dlp`); `_DEFAULTS` is source of truth | `core/config_manager.py`, all `docx/*` |
+| **DepChecker truth**: checks binaries + `import yt_dlp`; only Node.js is optional | `core/dep_checker.py`, docs |
+| **Error catalog aligned** with `_classify_error` (age_restricted, unavailable, rate_limited, Arabic cookie message, unsupported_url, extractor:{msg}, download_error:{msg}) | `core/download_controller.py`, docs |
+| **`get_common_opts` corrected**: `quiet=False`, `noplaylist=True`, `verbose` from config, `extractor_args` merged | `core/format_builder.py`, docs |
+| **`build_format_opts(quality, mode, config=None)`** signature; `merge_output_format` only in video mode | `core/format_builder.py`, docs |
+| **ADR-001 reversed** (Python API → subprocess); ADR-004 (nightly channel) removed | this doc, `README.md`, PRDs |
+| Requirements verified (5 lines, all used) | `requirements.txt`, docs |
+| Documentation rewritten to 3.0 (README, PROJECT_SUMMARY, PRD v3, this reference) | `README.md`, `docx/*` |
+| Install/update flows and Python API claims corrected across all docs | `docx/*` |
+
+### v2.0 (May 2026) — Prior documented baseline
+
+| Change | Files |
+|---|---|
+| Single-root CTkFrame architecture (StartupCheckFrame → MainWindow) | `app.py`, `ui/*` |
+| `CTkSeparator` → `tk.Frame(height=1)` | `ui/main_window.py` |
+| `format_sort` codec preference h264 > vp9 > av01; `throttledratelimit` 100 KB/s | `core/format_builder.py` |
+| yt-dlp-ejs via `js_runtimes`/`extractor_args` | `core/format_builder.py`, `requirements.txt` |
+| `bin/` added to PATH before imports | `app.py` |
+| Cookie default `"browser"` → `"none"`; Arabic cookie error message | `core/config_manager.py`, `core/download_controller.py` |
+| DepChecker absolute `BIN_DIR`; FFprobe check added; Node.js made optional | `core/dep_checker.py` |
+| Format maps prioritize mp4+m4a | `core/format_builder.py` |

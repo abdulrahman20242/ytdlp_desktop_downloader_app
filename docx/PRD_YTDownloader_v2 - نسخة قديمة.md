@@ -1,6 +1,10 @@
 # PRD — YT Downloader Desktop Application
 ### Version 2.0 | ReizanTech | May 2026
 
+> **⚠️ Superseded:** This older draft contains outdated design claims (Python API engine,
+> playlist as *future* feature, 4-tab settings). The current spec is
+> **`PRD_YTDownloader_v3.md`** (v3.0, Sep 2026). Kept for historical reference only.
+
 ---
 
 ## فهرس المحتويات
