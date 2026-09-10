@@ -5,6 +5,7 @@ venv/
 
 # Project Files
 bin/cookies.txt
+data/cookies.txt
 downloads/
 logs/
 .opencode
