@@ -9,10 +9,10 @@ YT Downloader provides a graphical interface for downloading YouTube content. It
 ## Features
 
 - **Video downloads** — up to 4K (2160p) with H.264 codec preference for compatibility
-- **Audio downloads** — MP3 (192 kbps) or M4A (no re-encode)
+- **Audio downloads** — MP3 (192 kbps) or M4A (no audio re-encode, with metadata/thumbnail processing)
 - **Playlist support** — fetch, browse, and download all or selected items from a playlist
 - **Quality selection** — Best, 2160p, 1440p, 1080p, 720p, 480p, 360p (filtered to available resolutions)
-- **Download modes** — Video, MP4 Only, or Audio
+- **Download modes** — video, mp4_only, or audio
 - **Cookie support** — import from Chrome, Firefox, Edge, or Brave; or load a `cookies.txt` file
 - **SponsorBlock** — optional removal of sponsor segments
 - **Throttling recovery** — automatic recovery when YouTube throttles download speed
@@ -91,7 +91,7 @@ Then place the required binaries (`yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`) in 
 2. The startup check validates your dependencies. Click **Continue** when ready.
 3. Paste a YouTube URL into the input field.
 4. Click **Fetch** to load video information (title, thumbnail, available qualities, duration, channel).
-5. Select a download mode (**Video**, **MP4 Only**, or **Audio**) and a quality level.
+5. Select a download mode (**video**, **mp4_only**, or **audio**) and a quality level.
 6. Choose a save folder (defaults to `~/Downloads/YTDownloader`).
 7. Click **Download** to start.
 8. Monitor progress via the progress bar, speed, and ETA indicators.
