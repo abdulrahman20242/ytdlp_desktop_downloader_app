@@ -1,10 +1,28 @@
 # YT Downloader v1.0.0
 
-A Windows desktop application for downloading YouTube videos, audio, and playlists using `yt-dlp`.
+A modern, portable Windows desktop application for downloading YouTube videos, audio, and playlists using `yt-dlp`.
+
+[![Release](https://img.shields.io/github/v/release/abdulrahman20242/ytdlp_desktop_downloader_app?color=green&label=Latest%20Release)](https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app/releases/latest)
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-blue)](#requirements)
+[![Tests](https://img.shields.io/badge/Tests-333%20passed-brightgreen)](#testing)
+
+---
+
+## ⬇️ Download (For Users)
+
+**No Python or command line setup required!** You can download the pre-compiled, fully portable bundle:
+
+📦 **[Download YT Downloader v1.0.0 (Portable ZIP)](https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app/releases/download/v1.0.0/YTDownloader-v1.0.0-windows-x64.zip)** (~174 MB)
+
+1. Download and extract **`YTDownloader-v1.0.0-windows-x64.zip`** to any folder.
+2. Double-click **`YT Downloader.exe`** to start.
+3. All dependencies (`yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`, `node.exe`) are bundled and ready out-of-the-box.
+
+---
 
 ## Overview
 
-YT Downloader provides a graphical interface for downloading YouTube content. It runs `yt-dlp` as a subprocess for downloads and uses the Python `yt_dlp` API only for extracting video metadata. The UI is built with `customtkinter` and supports Arabic and English.
+YT Downloader provides a clean graphical interface for downloading YouTube content. It runs `yt-dlp` as a subprocess for downloads and uses the Python `yt_dlp` API only for extracting video metadata. The UI is built with `customtkinter` with full Arabic and English support.
 
 ## Features
 
@@ -16,18 +34,14 @@ YT Downloader provides a graphical interface for downloading YouTube content. It
 - **Cookie support** — import from Chrome, Firefox, Edge, or Brave; or load a `cookies.txt` file
 - **SponsorBlock** — optional removal of sponsor segments
 - **Throttling recovery** — automatic recovery when YouTube throttles download speed
-- **JavaScript challenge handling** — via `yt-dlp-ejs` plugin and Node.js
+- **JavaScript challenge handling** — via `yt-dlp-ejs` plugin and bundled Node.js
 - **Progress tracking** — real-time progress bar with speed and ETA
-- **Download cancellation** — cancel any in-progress download
+- **Process-tree cancellation** — cleanly terminates download subprocesses and worker trees without leaving orphan processes
+- **Resilient configuration** — automatic schema validation, legacy path sanitization, and fallback recovery
 - **Logs panel** — collapsible log viewer with debug information
-- **Startup dependency check** — validates FFmpeg, FFprobe, Node.js, and yt-dlp at launch
-- **Settings dialog** — configure theme, language, download defaults, cookies, and advanced options
-- **Arabic / English UI** — right-to-left interface with full Arabic support
-- **Dark / Light / System theme** — switchable from settings
-
-## Screenshots
-
-No screenshots are currently available in the repository.
+- **Startup dependency check** — validates bundled binaries (yt-dlp, FFmpeg, FFprobe, Node.js) at launch
+- **Settings dialog** — configure theme, download defaults, cookies, and advanced options
+- **Dark / Light theme** — switchable from settings with system accent integration
 
 ## Requirements
 
@@ -114,7 +128,7 @@ Open the settings dialog from the main window.
 
 | Tab | Options |
 |---|---|
-| **General** | Theme (dark/light/system), Language (ar/en), Save folder |
+| **General** | Theme (dark/light/system), Save folder |
 | **Download** | Default quality, Default mode, Concurrent fragments, Retries |
 | **Advanced** | Cookie source (none/browser/file), Browser selection, Debug logs, SponsorBlock removal |
 
@@ -129,7 +143,6 @@ Settings are stored in `%APPDATA%\YTDownloader\config.json` (e.g. `C:\Users\<you
   "version": "1.0.0",
   "ui": {
     "theme": "dark",
-    "language": "ar",
     "window_width": 800,
     "window_height": 600
   },
