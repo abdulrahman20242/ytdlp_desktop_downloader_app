@@ -1,3 +1,5 @@
+import threading
+
 import customtkinter as ctk
 from core.dep_checker import DependencyChecker
 
@@ -37,10 +39,19 @@ class StartupCheckFrame(ctk.CTkFrame):
 
     def _run_checks(self):
         self.update()
-        checker = DependencyChecker()
-        results = checker.check_all()
-        self._display_results(results)
-        self.update()
+        # Run the (subprocess-heavy) dependency probe off the UI thread so the
+        # startup window doesn't freeze while FFmpeg/FFprobe/Node are probed.
+        # Results are posted back onto the main thread via after(0).
+
+        def run():
+            checker = DependencyChecker()
+            results = checker.check_all()
+            try:
+                self.after(0, lambda: self._display_results(results))
+            except RuntimeError:
+                pass  # frame was destroyed while checks were still running
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _display_results(self, results):
         for widget in self._status_frame.winfo_children():

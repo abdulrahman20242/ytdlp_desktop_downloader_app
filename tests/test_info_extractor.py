@@ -3,6 +3,7 @@ import pytest
 from core import info_extractor
 from core.info_extractor import (
     get_available_qualities,
+    qualities_from_info,
     extract_info,
     extract_playlist,
     extract_thumbnail,
@@ -74,6 +75,36 @@ def test_get_available_qualities_falls_back_to_best_on_error(monkeypatch):
 
     monkeypatch.setattr(info_extractor, "extract_info", boom)
     assert get_available_qualities("https://x") == ["Best"]
+
+
+@pytest.mark.parametrize(
+    ("info", "expected"),
+    [
+        (
+            {"formats": [{"height": 2160}]},
+            ["Best", "2160p", "1440p", "1080p", "720p", "480p", "360p", "240p"],
+        ),
+        (
+            {"formats": [{"height": 360}, {"height": 240}]},
+            ["Best", "360p", "240p"],
+        ),
+        ({"formats": [{"id": "no-height"}]}, ["Best"]),
+        ({}, ["Best"]),
+        (None, ["Best"]),
+    ],
+)
+def test_qualities_from_info_is_pure_and_never_reextracts(monkeypatch, info, expected):
+    # F-A1: deriving qualities must only use the already-fetched dict - it must
+    # not trigger a second (UI-thread-blocking) `extract_info` call.
+    calls = []
+
+    def spy(url):
+        calls.append(url)
+        return None
+
+    monkeypatch.setattr(info_extractor, "extract_info", spy)
+    assert qualities_from_info(info) == expected
+    assert calls == []
 
 
 @pytest.mark.parametrize(

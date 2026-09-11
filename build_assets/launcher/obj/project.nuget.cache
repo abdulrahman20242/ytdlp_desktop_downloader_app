@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "J+jQFIk+wPU=",
+  "success": true,
+  "projectFilePath": "F:\\projects\\Python Projects\\yt-dlp\\ytdlp_desktop_downloader_app\\build_assets\\launcher\\YTDownloader.Launcher.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\MF\\.nuget\\packages\\microsoft.netframework.referenceassemblies\\1.0.3\\microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
+    "C:\\Users\\MF\\.nuget\\packages\\microsoft.netframework.referenceassemblies.net48\\1.0.3\\microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg.sha512"
+  ],
+  "logs": []
+}

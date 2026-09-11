@@ -1,0 +1,62 @@
+{
+  "format": 1,
+  "restore": {
+    "F:\\projects\\Python Projects\\yt-dlp\\ytdlp_desktop_downloader_app\\build_assets\\launcher\\YTDownloader.Launcher.csproj": {}
+  },
+  "projects": {
+    "F:\\projects\\Python Projects\\yt-dlp\\ytdlp_desktop_downloader_app\\build_assets\\launcher\\YTDownloader.Launcher.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "F:\\projects\\Python Projects\\yt-dlp\\ytdlp_desktop_downloader_app\\build_assets\\launcher\\YTDownloader.Launcher.csproj",
+        "projectName": "YT Downloader",
+        "projectPath": "F:\\projects\\Python Projects\\yt-dlp\\ytdlp_desktop_downloader_app\\build_assets\\launcher\\YTDownloader.Launcher.csproj",
+        "packagesPath": "C:\\Users\\MF\\.nuget\\packages\\",
+        "outputPath": "F:\\projects\\Python Projects\\yt-dlp\\ytdlp_desktop_downloader_app\\build_assets\\launcher\\obj\\",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "C:\\Users\\MF\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net48"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net48": {
+            "targetAlias": "net48",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "warnAsError": [
+            "NU1605"
+          ]
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        }
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "dependencies": {
+            "Microsoft.NETFramework.ReferenceAssemblies": {
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[1.0.3, )"
+            }
+          },
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.417\\RuntimeIdentifierGraph.json"
+        }
+      },
+      "runtimes": {
+        "win7-x64": {
+          "#import": []
+        }
+      }
+    }
+  }
+}

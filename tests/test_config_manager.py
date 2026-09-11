@@ -87,3 +87,93 @@ def test_reset_persists_defaults_to_disk(config, tmp_path):
     config.reset_to_defaults()
     saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
     assert saved["ui"]["theme"] == "dark"
+
+
+# --------------------------------------------------------------------- #
+#  F-A4: malformed / truncated config must never take the app down
+# --------------------------------------------------------------------- #
+
+
+def test_malformed_config_uses_defaults_and_keeps_original(config, tmp_path):
+    (tmp_path / "config.json").write_text("{ not valid json !!!", encoding="utf-8")
+    reloaded = ConfigManager()
+    assert reloaded.get("ui.theme") == "dark"
+    assert reloaded.get("download.retries") == 10
+    # the unusable file is preserved in place (no destructive rewrite on load)
+    assert (tmp_path / "config.json").read_text(encoding="utf-8") == "{ not valid json !!!"
+
+
+def test_malformed_config_produces_backup_file(config, tmp_path):
+    (tmp_path / "config.json").write_text("{ broken", encoding="utf-8")
+    ConfigManager()
+    backup = tmp_path / "config.json.bak"
+    assert backup.read_text(encoding="utf-8") == "{ broken"
+
+
+def test_non_dict_config_falls_back_to_defaults(config, tmp_path):
+    (tmp_path / "config.json").write_text("[1, 2, 3]", encoding="utf-8")
+    reloaded = ConfigManager()
+    assert reloaded.get("ui.theme") == "dark"
+    assert (tmp_path / "config.json.bak").exists()
+
+
+def test_empty_config_file_is_recovered(config, tmp_path):
+    (tmp_path / "config.json").write_text("", encoding="utf-8")
+    reloaded = ConfigManager()
+    assert reloaded.get("download.default_quality") == "1080p"
+
+
+def test_truncated_json_is_recovered_with_backup(config, tmp_path):
+    # an interrupted atomic-write artifact: a partial JSON document
+    (tmp_path / "config.json").write_text('{"ui": {"theme": "lig', encoding="utf-8")
+    reloaded = ConfigManager()
+    assert reloaded.get("ui.theme") == "dark"
+    assert (tmp_path / "config.json.bak").exists()
+
+
+def test_partial_saved_values_survive_reload_with_defaults(config, tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps({"download": {"retries": 3}}), encoding="utf-8"
+    )
+    reloaded = ConfigManager()
+    assert reloaded.get("download.retries") == 3
+    assert reloaded.get("ui.theme") == "dark"
+
+
+def test_non_dict_override_of_default_section_is_kept_not_crashing(config, tmp_path):
+    # _merge must tolerate a saved value that replaces a default dict section
+    (tmp_path / "config.json").write_text(
+        json.dumps({"download": "a string instead of a dict"}), encoding="utf-8"
+    )
+    reloaded = ConfigManager()
+    assert reloaded.get("download") == "a string instead of a dict"
+    assert reloaded.get("ui.theme") == "dark"
+
+
+def test_save_after_malformed_recovery_persists_valid_config(config, tmp_path):
+    (tmp_path / "config.json").write_text("{ garbage", encoding="utf-8")
+    reloaded = ConfigManager()
+    reloaded.set("ui.theme", "light")
+    saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+    assert saved["ui"]["theme"] == "light"
+    # the unusable original is still preserved as a backup
+    assert (tmp_path / "config.json.bak").read_text(encoding="utf-8") == "{ garbage"
+
+
+def test_save_is_atomic_and_leaves_no_tmp_behind(config, tmp_path):
+    config.set("ui.theme", "light")
+    assert not list(tmp_path.glob("config.json.tmp"))
+    assert json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))["ui"]["theme"] == "light"
+
+
+def test_save_failure_is_tolerated_and_cleans_temp(config, tmp_path, monkeypatch):
+    import core.config_manager as cm
+
+    def boom_replace(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(cm.os, "replace", boom_replace)
+    config.set("ui.theme", "light")
+    # value still live in memory, no exception to the caller, no tmp litter
+    assert config.get("ui.theme") == "light"
+    assert not list(tmp_path.glob("config.json.tmp"))

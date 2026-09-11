@@ -3,12 +3,19 @@ __pycache__/
 venv/
 .venv/
 
+# Build outputs
+build_assets/build/
+build/
+dist/
+Release/
+
 # Project Files
 bin/cookies.txt
 data/cookies.txt
 downloads/
 logs/
 .opencode
+.codex
 graphify-out
 .coverage
 

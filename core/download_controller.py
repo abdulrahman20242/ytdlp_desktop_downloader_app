@@ -5,6 +5,8 @@ import subprocess
 import threading
 from pathlib import Path
 
+from utils.paths import bin_dir
+
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _PROGRESS_RE = re.compile(r"\[download\]\s+([\d.]+)%")
@@ -70,8 +72,43 @@ def _parse_destination(line: str) -> str | None:
     return None
 
 
+def _terminate_tree(proc):
+    """Terminate a subprocess and, on Windows, its whole descendant tree.
+
+    yt-dlp spawns a child ffmpeg/ffprobe for merging and remuxing. Killing only
+    the top-level process orphans those children, which keep running and can
+    leave temp files behind. ``taskkill /T`` kills the entire tree, with a
+    plain ``terminate()`` as the portable fallback. A no-op when the process is
+    absent or already finished.
+    """
+    if proc is None:
+        return
+    poll = getattr(proc, "poll", None)
+    if callable(poll) and poll() is not None:
+        return
+    try:
+        pid = proc.pid
+    except Exception:
+        return
+    if os.name == "nt":
+        if pid is not None:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                return
+            except Exception:
+                pass
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+
+
 def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
-    base_bin = Path(__file__).resolve().parent.parent / "bin"
+    base_bin = bin_dir()
     ffmpeg = opts.get("ffmpeg_location")
     ffmpeg_dir = Path(ffmpeg) if ffmpeg else base_bin
 
@@ -224,7 +261,7 @@ class DownloadController:
         self._poll_queue()
 
     def _exe_path(self, opts: dict | None = None) -> Path:
-        base = Path(__file__).resolve().parent.parent / "bin"
+        base = bin_dir()
         ffmpeg = (opts or {}).get("ffmpeg_location")
         if ffmpeg:
             base = Path(ffmpeg)
@@ -248,6 +285,7 @@ class DownloadController:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
         except Exception as e:
             return f"unknown:{e}"
@@ -284,8 +322,7 @@ class DownloadController:
                     self._queue.put(("log", f"[INFO] {line}"))
         finally:
             self._proc = None
-            if proc.poll() is None:
-                proc.terminate()
+            _terminate_tree(proc)
 
         if self._stop_event.is_set():
             return "cancelled"
@@ -399,16 +436,30 @@ class DownloadController:
 
     def cancel(self):
         self._stop_event.set()
-        if self._proc:
-            try:
-                self._proc.terminate()
-            except Exception:
-                pass
+        _terminate_tree(self._proc)
         if self._after_id and self._app:
             try:
                 self._app.after_cancel(self._after_id)
             except Exception:
                 pass
+
+    def shutdown(self):
+        """Cancel any active run and fully release resources (used on close).
+
+        Stops the worker, kills the whole yt-dlp/ffmpeg process tree, drains
+        the worker thread with a bounded wait, and cancels the pending UI poll
+        so closing the window never hangs (and never leaves orphans).
+        """
+        self._stop_event.set()
+        _terminate_tree(self._proc)
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=3.0)
+        if self._after_id and self._app:
+            try:
+                self._app.after_cancel(self._after_id)
+            except Exception:
+                pass
+        self._proc = None
 
     def is_downloading(self) -> bool:
         return self._thread is not None and self._thread.is_alive()

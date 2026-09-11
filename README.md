@@ -37,7 +37,7 @@ No screenshots are currently available in the repository.
 |---|---|
 | **OS** | Windows 10/11 (x64) |
 | **Python** | 3.11 or later |
-| **yt-dlp** | Python package (`yt-dlp[default]>=2025.1.1`) |
+| **yt-dlp** | Python package (`yt-dlp[default]==2026.08.19`) |
 | **FFmpeg** | `bin/ffmpeg.exe` — video/audio merging |
 | **FFprobe** | `bin/ffprobe.exe` — media probing |
 
@@ -51,12 +51,14 @@ No screenshots are currently available in the repository.
 ### Python Packages
 
 ```
-yt-dlp[default]>=2025.1.1
+yt-dlp[default]==2026.08.19
 yt-dlp-ejs>=0.8.0
 customtkinter>=5.2.0
 Pillow>=10.0.0
 requests>=2.31.0
 ```
+
+> The `yt-dlp` version is pinned to match the bundled `bin/yt-dlp.exe` release so the metadata extractor and the downloader stay aligned.
 
 > `yt-dlp-ejs` is a yt-dlp plugin, not a standalone Python import. It is activated at download time.
 
@@ -118,7 +120,7 @@ Open the settings dialog from the main window.
 
 ## Configuration
 
-Settings are stored in `data/config.json`, created automatically on first run.
+Settings are stored in `%APPDATA%\YTDownloader\config.json` (e.g. `C:\Users\<you>\AppData\Roaming\YTDownloader\config.json`). The file is only written once you change a setting — a fresh install runs entirely on defaults. If the file is ever corrupted or truncated, the app falls back to defaults automatically and preserves the unusable file as `config.json.bak` next to it.
 
 ### Default Configuration
 
@@ -142,7 +144,7 @@ Settings are stored in `data/config.json`, created automatically on first run.
   "cookies": {
     "source": "none",
     "browser": "chrome",
-    "file_path": "data/cookies.txt"
+    "file_path": "%APPDATA%\\YTDownloader\\cookies.txt"
   },
   "advanced": {
     "show_debug_logs": false,
@@ -219,11 +221,11 @@ Downloads run `bin/yt-dlp.exe` as a subprocess and parse its stdout line-by-line
 │   └── format_builder.py      # yt-dlp format strings + options
 ├── utils/                     # Shared utilities
 │   ├── ui_logger.py           # Thread-safe logger for UI
+│   ├── paths.py               # App/UserData/Bin directory resolution
 │   ├── validators.py          # YouTube URL validation
 │   └── file_utils.py          # File/folder helpers
 ├── assets/                    # Static assets (fonts)
 ├── bin/                       # Binaries (not in Git)
-├── data/                      # Runtime config (auto-generated)
 ├── tests/                     # Test suite
 ├── docx/                      # Design documents (PRD, reference)
 ├── FAQ.md                     # Frequently asked questions
@@ -250,6 +252,20 @@ pip install -r requirements.txt
 ```powershell
 python app.py
 ```
+
+### Building a Portable Release
+
+```powershell
+.\build_windows.bat
+```
+
+The build compiles the launcher (`dotnet publish`), freezes the app with
+PyInstaller (`ytdownloader.spec`), assembles `Release\YT Downloader.exe` +
+`Release\YT Downloader\...` (launcher, `_internal\`, `assets\`, `bin\`), then
+runs a packaged self-test via `YTDLP_DESKTOP_SELFTEST=1` before reporting a
+summary. User data (config, cookies) always lives under `%APPDATA%\YTDownloader\`,
+never inside the install folder, so the release is portable and upgradeable
+in place.
 
 ### Testing
 

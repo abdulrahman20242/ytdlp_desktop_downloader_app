@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+import tkinter.messagebox as messagebox
 import threading
 from pathlib import Path
 import tkinter.filedialog as fd
@@ -15,12 +16,18 @@ from ui.playlist_panel import PlaylistPanel
 from core.download_controller import DownloadController
 from core.format_builder import build_format_opts, get_common_opts
 from core.info_extractor import (
-    extract_info, get_available_qualities,
+    extract_info, qualities_from_info,
     extract_thumbnail, extract_title, extract_duration, extract_uploader,
     extract_playlist,
 )
 from utils.validators import is_valid_youtube_url, classify_url
-from utils.file_utils import open_folder, sanitize_folder_name
+from utils.file_utils import (
+    open_folder,
+    sanitize_folder_name,
+    get_downloads_dir,
+    ensure_dir,
+)
+from utils.paths import bin_dir, cookies_path
 
 # Name of the two pages inside the single ``CTkTabview``.
 _VIDEO_TAB = "تحميل الفيديو"
@@ -447,7 +454,11 @@ class MainWindow(ctk.CTkFrame):
 
         def fetch():
             info = extract_info(url)
-            self.after(0, self._display_info, info)
+            # Derive the quality list here, in the worker thread, so the UI
+            # thread never performs a second slow extraction (the old path
+            # called get_available_qualities() inside _display_info).
+            qualities = qualities_from_info(info)
+            self.after(0, self._display_info, info, qualities)
 
         threading.Thread(target=fetch, daemon=True).start()
 
@@ -480,8 +491,11 @@ class MainWindow(ctk.CTkFrame):
 
         threading.Thread(target=fetch, daemon=True).start()
 
-    def _display_info(self, info: dict | None):
+    def _display_info(self, info: dict | None, qualities: list[str] | None = None):
         self._fetch_btn.configure(state="normal", text="استعلام")
+
+        if qualities is None:
+            qualities = ["Best"]
 
         if not info:
             self._title_label.configure(text="❌ فشل استخراج المعلومات — تحقق من الرابط")
@@ -499,7 +513,7 @@ class MainWindow(ctk.CTkFrame):
             text=f"القناة: {uploader}\nالمدة: {mins}:{secs:02d}"
         )
 
-        qualities = get_available_qualities(self._url_var.get().strip())
+        qualities = qualities or ["Best"]
         self._quality_selector.set_qualities(qualities)
 
         thumb_url = extract_thumbnail(info)
@@ -558,6 +572,9 @@ class MainWindow(ctk.CTkFrame):
             if current and current != saved:
                 self.config.set("download.default_dir", current)
                 break
+        # Kill any active yt-dlp/ffmpeg tree and drain the worker before the
+        # window goes away, so closing mid-download leaves no orphans behind.
+        self._controller.shutdown()
         self.master.destroy()
 
     def _open_settings(self):
@@ -583,7 +600,7 @@ class MainWindow(ctk.CTkFrame):
         quality = selector.quality
         mode = selector.mode
 
-        base_opts = get_common_opts("bin", self.config)
+        base_opts = get_common_opts(bin_dir(), self.config)
         format_opts = build_format_opts(quality, mode, self.config)
         opts = {**base_opts, **format_opts}
 
@@ -592,7 +609,9 @@ class MainWindow(ctk.CTkFrame):
             browser = self.config.get("cookies.browser", "chrome")
             opts["cookiesfrombrowser"] = (browser,)
         elif cookies_source == "file":
-            cookie_path = Path(self.config.get("cookies.file_path", "data/cookies.txt"))
+            cookie_path = Path(self.config.get("cookies.file_path", str(cookies_path())))
+            if not cookie_path.is_absolute():
+                cookie_path = cookies_path()
             if cookie_path.exists():
                 opts["cookiefile"] = str(cookie_path)
 
@@ -631,24 +650,43 @@ class MainWindow(ctk.CTkFrame):
         self._playlist_fetch_btn.configure(state="normal")
         self._playlist_url_entry.configure(state="normal")
 
-    def _resolve_dir(self, var) -> Path:
+    def _resolve_dir(self, var, log=None) -> Path:
         raw = var.get().strip()
         if not raw:
             raw = self.config.get("download.default_dir", "")
-        save_dir = Path(raw or "downloads")
-        save_dir.mkdir(parents=True, exist_ok=True)
-        return save_dir
+        save_dir = Path(raw or get_downloads_dir())
+        try:
+            return ensure_dir(save_dir)
+        except OSError as e:
+            fallback = self._fallback_save_dir()
+            msg = f"تعذّر إنشاء مجلد الحفظ «{save_dir}» — سيتم الحفظ في «{fallback}»"
+            if log is not None:
+                log.append_log(f"[ERROR] {msg} ({e})")
+            messagebox.showwarning("مجلد الحفظ", f"{msg}\n\n{type(e).__name__}: {e}")
+            return fallback
+
+    def _fallback_save_dir(self) -> Path:
+        fb = get_downloads_dir()
+        try:
+            return ensure_dir(fb)
+        except OSError:
+            return fb
 
     def _resolve_save_dir(self) -> Path:
-        return self._resolve_dir(self._dir_var)
+        return self._resolve_dir(self._dir_var, getattr(self, "_video_logs", None))
 
     def _playlist_save_dir(self, base: Path) -> Path:
         """Subfolder named after the playlist inside the chosen destination."""
         title = (self._current_playlist or {}).get("title") or ""
         folder = sanitize_folder_name(title, fallback="Playlist")
         target = base / folder
-        target.mkdir(parents=True, exist_ok=True)
-        return target
+        try:
+            return ensure_dir(target)
+        except OSError as e:
+            msg = f"تعذّر إنشاء مجلد القائمة «{target}» — سيتم الحفظ مباشرة في «{base}»"
+            self._playlist_logs.append_log(f"[ERROR] {msg} ({e})")
+            messagebox.showwarning("مجلد القائمة", f"{msg}\n\n{type(e).__name__}: {e}")
+            return base
 
     def _start_download(self):
         if self._controller.is_downloading():
@@ -690,7 +728,7 @@ class MainWindow(ctk.CTkFrame):
             self._playlist_logs.append_log("[INFO] لا توجد مقاطع محددة")
             return
 
-        save_dir = self._resolve_dir(self._playlist_dir_var)
+        save_dir = self._resolve_dir(self._playlist_dir_var, self._playlist_logs)
         if self._current_playlist:
             save_dir = self._playlist_save_dir(save_dir)
         self._current_playlist_dir = save_dir

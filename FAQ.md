@@ -13,7 +13,7 @@ A Windows desktop application for downloading YouTube videos, audio, and playlis
 The UI defaults to Arabic (`ui.theme.language = "ar"`) but can be switched to English from Settings → عام. On-disk config and internal messages are English; user-facing errors are localized.
 
 ### 3. What does the app do on startup?
-`app.py` prepares `bin/` on PATH, loads `data/config.json`, then shows a `StartupCheckFrame` that runs the dependency check synchronously (FFmpeg, FFprobe required; Node.js optional; yt-dlp package required). On success it swaps to the embedded `MainWindow`.
+`app.py` prepares `bin/` on PATH and loads the config if present (a fresh install has no config file yet — the app just runs on defaults). A `StartupCheckFrame` then opens immediately and runs the dependency checks (FFmpeg, FFprobe required; Node.js optional; yt-dlp package required) on a background thread, so the window renders without freezing while the checks run. The results are posted back to the UI thread when they finish. On success it swaps to the embedded `MainWindow`.
 
 ---
 
@@ -81,12 +81,12 @@ It is shown only when a playlist URL is loaded; it occupies main-frame row 2 wit
 ## Configuration
 
 ### 15. Where is the configuration stored?
-`data/config.json`, resolved relative to the current working directory (`Path("data/config.json")`). It is created on first run from `config_manager._DEFAULTS`.
+`%APPDATA%\YTDownloader\config.json` (e.g. `C:\Users\<you>\AppData\Roaming\YTDownloader\config.json`), resolved via `utils/paths.py`. The file is written only when a setting is first changed — it is never created just by running the app. Saves are atomic (write to `config.json.tmp`, then replace), and a corrupted file on load is backed up to `config.json.bak` while the app falls back to `_DEFAULTS`.
 
 ### 16. What are the defaults?
 - `ui`: theme `dark`, language `ar`, window `800x600`.
 - `download`: default_dir `~/Downloads/YTDownloader`, default_quality `1080p`, default_mode `video`, concurrent_fragments `4`, retries `10`, merge_output_format `mp4`.
-- `cookies`: source `none` (file path `data/cookies.txt` if used).
+- `cookies`: source `none` (file path `%APPDATA%\YTDownloader\cookies.txt` if used).
 - `advanced`: show_debug_logs `false`, sponsorblock_remove `false` (categories `["sponsor"]`), extractor_args optional override for `{"youtube-ejs": {}}`.
 
 Keys that exist only in older docs (e.g. `audio.*`, `embed_*`, `ffmpeg_location`, `node_path`, `use_nightly_yt_dlp`) are ignored — `_DEFAULTS` is the only source of truth.
@@ -98,7 +98,7 @@ Three tabs:
 - **متقدم (Advanced):** cookie source (none/browser/file), browser picker, show debug logs, SponsorBlock toggle + categories.
 
 ### 18. How do cookies work?
-`cookies.source` is `none` by default — cookies are only used when enabled. Browser extraction requires the browser to be closed (Chrome's DB is locked while open, producing `Could not copy Chrome cookie database`). A file source reads `data/cookies.txt` (Netscape format).
+`cookies.source` is `none` by default — cookies are only used when enabled. Browser extraction requires the browser to be closed (Chrome's DB is locked while open, producing `Could not copy Chrome cookie database`). A file source reads `%APPDATA%\YTDownloader\cookies.txt` (Netscape format).
 
 ---
 
@@ -115,17 +115,28 @@ Three tabs:
 `core/dep_checker.py` runs 4 synchronous checks: FFmpeg (required), FFprobe (required), Node.js (optional), and the yt-dlp Python package (`import yt_dlp` → `yt_dlp.version.__version__`). `BIN_DIR` is an absolute path derived from the file location, not CWD.
 
 ### 21. Does the app auto-update yt-dlp?
-No. Automatic update and the nightly yt-dlp channel were dropped; the app ships with a bundled `bin/yt-dlp.exe` that you update manually if needed. Requirements pin `yt-dlp[default]>=2025.1.1`.
+No. Automatic update and the nightly yt-dlp channel were dropped; the app ships with a bundled `bin/yt-dlp.exe` that you update manually if needed. `requirements.txt` pins the matching Python package to `yt-dlp[default]==2026.08.19` so the info-extraction path and the subprocess downloader stay on the same engine version.
 
 ### 22. How is the app packaged?
-There is **no `build.spec`** in the repo. PyInstaller `--onedir --noconsole` is planned; the EXE must be shipped next to `bin/`, `assets/logo.ico`, and a writable `data/` folder.
+`build_windows.bat` drives `build_windows.ps1`: it compiles the launcher (`YTDownloaderCore.exe`, a small .NET app that get-version and re-launches the frozen app), runs PyInstaller with `ytdownloader.spec` (`--onedir --noconsole`, `--add-data` for `assets/` and `bin/`), and assembles the portable layout under `Release\`:
+
+```
+Release\YT Downloader.exe              <- launcher
+Release\YT Downloader\
+  ├── YTDownloaderCore.exe
+  ├── _internal\                        <- frozen Python app
+  ├── assets\
+  └── bin\yt-dlp.exe ffmpeg.exe ffprobe.exe node.exe
+```
+
+The build finishes with a packaged self-test (`YTDLP_DESKTOP_SELFTEST=1`) and prints a summary with pass/fail and elapsed time. User data is never written into the install folder — everything goes to `%APPDATA%\YTDownloader\` — so the folder can be moved, copied, or upgraded in place.
 
 ---
 
 ## Tests & known behaviors
 
 ### 23. What is the test setup?
-272 passing pytest tests across `tests/` (12 test files + `conftest.py`), with `customtkinter`/`tkinter` and `yt_dlp` stubbed out. `ruff check` is clean on `core/ utils/ ui/ tests/`.
+315 passing pytest tests across `tests/` (with `customtkinter`/`tkinter` and `yt_dlp` stubbed out). `ruff check` is clean on `core/ utils/ ui/ tests/`.
 
 ### 24. Where should new links be validated?
 `utils/validators.py`:
@@ -144,4 +155,4 @@ There is **no `build.spec`** in the repo. PyInstaller `--onedir --noconsole` is 
 ## Legacy documents
 
 ### 26. Where is the old bug log and PRD?
-This file (`FAQ.md`) replaces the previous `BUGS.md` bug log; the fixes it documented are now covered by Q&A above (§24-25) and tests 272/272 pass. The superseded design document is `docx/PRD_YTDownloader_v2.md` (kept for history); the current spec is `docx/PRD_YTDownloader_v3.md` and the implementation diff is in `docx/PRD_DIFF.md`.
+This file (`FAQ.md`) replaces the previous `BUGS.md` bug log; the fixes it documented are now covered by Q&A above (§24-25) and tests 315/315 pass. The superseded design document is `docx/PRD_YTDownloader_v2.md` (kept for history); the current spec is `docx/PRD_YTDownloader_v3.md` and the implementation diff is in `docx/PRD_DIFF.md`.

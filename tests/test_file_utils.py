@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from utils.file_utils import (
     safe_filename,
@@ -61,3 +62,51 @@ def test_ensure_dir_creates_nested_path(tmp_path):
     result = ensure_dir(target)
     assert result == target
     assert target.is_dir()
+
+
+def test_ensure_dir_with_spaces_and_non_ascii(tmp_path):
+    target = tmp_path / "حفظ مقاطع" / "my folder"
+    result = ensure_dir(target)
+    assert result == target
+    assert target.is_dir()
+
+
+def test_ensure_dir_target_is_existing_file_uses_fallback(tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("I am a file, not a directory", encoding="utf-8")
+    fallback = tmp_path / "fallback_dir"
+    result = ensure_dir(blocked, fallback=fallback)
+    assert result == fallback
+    assert fallback.is_dir()
+
+
+def test_ensure_dir_target_is_existing_file_without_fallback_raises(tmp_path):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("file", encoding="utf-8")
+    with pytest.raises(OSError):
+        ensure_dir(blocked)
+
+
+def test_ensure_dir_falls_back_when_primary_mkdir_fails(monkeypatch, tmp_path):
+    primary = tmp_path / "primary"
+    fallback = tmp_path / "fallback"
+    orig_mkdir = Path.mkdir
+
+    def deny_primary(self, **kwargs):
+        if self == primary:
+            raise PermissionError(13, "Access denied", str(self))
+        return orig_mkdir(self, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", deny_primary)
+    result = ensure_dir(primary, fallback=fallback)
+    assert result == fallback
+    assert fallback.is_dir()
+
+
+def test_ensure_dir_propagates_when_fallback_also_fails(monkeypatch, tmp_path):
+    def deny_all(self, **kwargs):
+        raise PermissionError(13, "Access denied", str(self))
+
+    monkeypatch.setattr(Path, "mkdir", deny_all)
+    with pytest.raises(PermissionError):
+        ensure_dir(tmp_path / "primary", fallback=tmp_path / "fallback")

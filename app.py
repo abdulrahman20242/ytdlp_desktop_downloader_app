@@ -1,23 +1,35 @@
 #!/usr/bin/env python3
 import os
 import sys
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).parent.resolve()
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+# Resolve application paths from the executable location *before* importing
+# anything else. In the frozen onedir build the resources live beside
+# YTDownloaderCore.exe (never inside _internal), in a source checkout they
+# live at the project root.
+from utils.paths import assets_dir, bin_dir
 
-# أضف bin/ للـ PATH قبل أي شيء — يضمن العثور على node.exe وقت تحميل yt-dlp-ejs
-os.environ["PATH"] = str(PROJECT_ROOT / "bin") + os.pathsep + os.environ.get("PATH", "")
+app_root = bin_dir().parent
+if str(app_root) not in sys.path:
+    sys.path.insert(0, str(app_root))
+
+# Prepend bin/ to PATH before importing anything — guarantees node.exe is
+# found when yt-dlp loads its bundled yt-dlp-ejs JavaScript solver.
+os.environ["PATH"] = str(bin_dir()) + os.pathsep + os.environ.get("PATH", "")
 
 import customtkinter as ctk
 from core.config_manager import ConfigManager
-from ui.startup_check import StartupCheckFrame
 from ui.main_window import MainWindow
+from ui.startup_check import StartupCheckFrame
 
 
 def main():
     config = ConfigManager()
+
+    # Packaging self-test: when YTDLP_DESKTOP_SELFTEST is set the app performs
+    # its imports/config bootstrap and exits with 0 — used by the build
+    # pipeline to validate the frozen bundle without opening a GUI window.
+    if os.environ.get("YTDLP_DESKTOP_SELFTEST"):
+        return
 
     ctk.set_appearance_mode(config.get("ui.theme", "dark"))
 
@@ -31,7 +43,9 @@ def main():
     root.grid_rowconfigure(0, weight=1)
 
     try:
-        root.iconbitmap("assets/logo.ico")
+        logo = next(assets_dir().glob("*.ico"), None)
+        if logo:
+            root.iconbitmap(str(logo))
     except Exception:
         pass
 

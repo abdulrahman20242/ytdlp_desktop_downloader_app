@@ -1,7 +1,10 @@
-from pathlib import Path
 from yt_dlp import YoutubeDL
 
-BIN_DIR = Path("bin")
+from utils.paths import bin_dir
+
+BIN_DIR = bin_dir()
+
+_QUALITY_THRESHOLDS = (2160, 1440, 1080, 720, 480, 360, 240)
 
 
 def extract_info(url: str) -> dict | None:
@@ -19,13 +22,18 @@ def extract_info(url: str) -> dict | None:
 
 
 def get_available_qualities(url: str) -> list[str]:
-    """Return 'Best' plus preset tiers at or below the video's max height.
+    """Return 'Best' plus preset tiers at or below the video's max height."""
+    return qualities_from_info(extract_info(url))
+
+
+def qualities_from_info(info: dict | None) -> list[str]:
+    """Derive the quality selector list from an already-fetched ``info`` dict.
 
     Each tier is a height *threshold*, not an exact resolution: a 1080p video
     yields Best, 1080p, 720p, ... and never 1440p/2160p, because no format
-    reaches those heights.
+    reaches those heights. Passing the caller's existing ``info`` avoids a
+    second costly ``extract_info`` call.
     """
-    info = extract_info(url)
     if not info:
         return ["Best"]
 
@@ -35,8 +43,9 @@ def get_available_qualities(url: str) -> list[str]:
         if h:
             heights.add(h)
 
-    thresholds = [2160, 1440, 1080, 720, 480, 360, 240]
-    return ["Best"] + [f"{h}p" for h in thresholds if any(x >= h for x in heights)]
+    return ["Best"] + [
+        f"{h}p" for h in _QUALITY_THRESHOLDS if any(x >= h for x in heights)
+    ]
 
 
 def extract_thumbnail(info: dict) -> str | None:

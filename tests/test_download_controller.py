@@ -1,4 +1,6 @@
+import os
 import queue
+import subprocess
 import threading
 from pathlib import Path
 
@@ -44,6 +46,23 @@ class _BlockingProc(_FakeProc):
         self._started.set()
         self._release.wait(timeout=5)
         return iter(self.lines)
+
+
+class _KillableProc:
+    """A live-looking process: poll() stays None until killed, has a pid."""
+
+    def __init__(self, pid=4242):
+        self.pid = pid
+        self.terminated = False
+
+    def poll(self):
+        return None
+
+    def wait(self):
+        return 0
+
+    def terminate(self):
+        self.terminated = True
 
 
 class _FakeApp:
@@ -626,18 +645,115 @@ def test_poll_queue_returns_without_rescheduling_after_done():
     assert app._after_called == []
 
 
-def test_cancel_stop_and_terminates_live_process():
+@pytest.mark.skipif(os.name != "nt", reason="Windows process-tree kill via taskkill")
+def test_cancel_kills_process_tree_via_taskkill(monkeypatch):
+    calls = {}
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        calls["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
     c = DownloadController(config=None)
     c._queue = queue.Queue()
     fake = _FakeApp()
     c._app = fake
     c._after_id = 99
+    proc = _KillableProc(pid=4242)
+    c._proc = proc
+    c.cancel()
+    assert c._stop_event.is_set()
+    assert calls["cmd"] == ["taskkill", "/PID", "4242", "/T", "/F"]
+    assert calls["kwargs"].get("creationflags") == subprocess.CREATE_NO_WINDOW
+    assert proc.terminated is False  # tree killed via taskkill, not terminate()
+    assert fake._cancelled == [99]
+
+
+def test_cancel_falls_back_to_terminate_when_taskkill_unavailable(monkeypatch):
+    # simulate non-Windows (or taskkill failure): direct child must be killed
+    monkeypatch.setattr("os.name", "posix")
+    c = DownloadController(config=None)
+    c._queue = queue.Queue()
+    fake = _FakeApp()
+    c._app = fake
+    c._after_id = 42
+    proc = _KillableProc(pid=9)
+    c._proc = proc
+    c.cancel()
+    assert proc.terminated is True
+    assert fake._cancelled == [42]
+
+
+def test_cancel_does_nothing_when_no_active_process():
+    c = DownloadController(config=None)
+    c._queue = queue.Queue()
+    c.cancel()
+    assert c._stop_event.is_set()
+
+
+def test_cancel_with_process_without_pid_is_safe():
+    # _FakeProc has no .pid -> the tree-kill helper must back off harmlessly
+    c = DownloadController(config=None)
+    c._queue = queue.Queue()
+    fake = _FakeApp()
+    c._app = fake
+    c._after_id = 5
     proc = _FakeProc(["[info] x"], rc=1)
     c._proc = proc
     c.cancel()
     assert c._stop_event.is_set()
-    assert proc.terminated is True
-    assert fake._cancelled == [99]
+    assert fake._cancelled == [5]
+
+
+def test_cancel_is_idempotent(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    c = DownloadController(config=None)
+    c._queue = queue.Queue()
+    c._proc = _KillableProc(pid=13)
+    c.cancel()
+    c.cancel()  # second cancel must not raise even though the tree is gone
+
+
+def test_shutdown_cleans_up_active_run(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0),
+    )
+    started = threading.Event()
+    c = DownloadController(config=None)
+    c._queue = queue.Queue()
+    fake = _FakeApp()
+    c._app = fake
+    c._after_id = 7
+    c._proc = _KillableProc(pid=21)
+
+    def worker():
+        started.set()
+        c._stop_event.wait(timeout=5)
+
+    t = threading.Thread(target=worker, daemon=True)
+    c._thread = t
+    t.start()
+    assert started.wait(timeout=5)
+    c.shutdown()
+    assert c._stop_event.is_set()
+    assert c._proc is None
+    assert c.is_downloading() is False  # bounded join actually joined
+    assert fake._cancelled == [7]
+
+
+def test_shutdown_without_active_run_is_quick_and_safe():
+    c = DownloadController(config=None)
+    c._queue = queue.Queue()
+    c.shutdown()
+    assert c._proc is None
+    assert c.is_downloading() is False
 
 
 def test_is_downloading_reflects_thread_state():

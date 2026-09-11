@@ -1,7 +1,11 @@
+import os
 import shutil
 import subprocess
-from pathlib import Path
 from dataclasses import dataclass
+
+from utils.paths import bin_dir
+
+_CREATE_NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
 
 @dataclass
@@ -14,7 +18,7 @@ class DepResult:
 
 
 class DependencyChecker:
-    BIN_DIR = Path(__file__).resolve().parent.parent / "bin"
+    BIN_DIR = bin_dir()
 
     def check_all(self) -> list[DepResult]:
         return [
@@ -31,7 +35,10 @@ class DependencyChecker:
         if path:
             try:
                 out = subprocess.check_output(
-                    [str(path), "-version"], stderr=subprocess.STDOUT, text=True
+                    [str(path), "-version"],
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    creationflags=_CREATE_NO_WINDOW,
                 )
                 version = out.split("\n")[0] if out else "unknown"
             except Exception:
@@ -46,7 +53,10 @@ class DependencyChecker:
         if path:
             try:
                 out = subprocess.check_output(
-                    [str(path), "-version"], stderr=subprocess.STDOUT, text=True
+                    [str(path), "-version"],
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    creationflags=_CREATE_NO_WINDOW,
                 )
                 version = out.split("\n")[0] if out else "unknown"
             except Exception:
@@ -61,7 +71,9 @@ class DependencyChecker:
         if path:
             try:
                 ver = subprocess.check_output(
-                    [str(path), "--version"], text=True
+                    [str(path), "--version"],
+                    text=True,
+                    creationflags=_CREATE_NO_WINDOW,
                 ).strip()
             except Exception:
                 ver = "unknown"

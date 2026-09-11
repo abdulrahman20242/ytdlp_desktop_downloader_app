@@ -3,9 +3,25 @@ import re
 from pathlib import Path
 
 
-def ensure_dir(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def ensure_dir(path: Path, fallback: Path | None = None) -> Path:
+    """Create ``path`` (with parents) and return it.
+
+    When the directory cannot be created - e.g. the target already exists as a
+    plain file, or the OS denies the write - and ``fallback`` is provided, the
+    fallback directory is created and returned instead. Without a fallback the
+    original ``OSError`` propagates to the caller.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    except OSError:
+        if fallback is None:
+            raise
+    try:
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+    except OSError:
+        raise
 
 
 def open_folder(path: Path):
