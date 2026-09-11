@@ -94,16 +94,61 @@ def test_node_present_reports_version(checker, monkeypatch):
     assert result.required is False
 
 
-def test_ytdlp_installed_reports_required(checker, monkeypatch):
-    import yt_dlp
+def test_ytdlp_python_package_exists_but_bundled_exe_missing(checker):
+    # Python yt_dlp exists, but bundled bin/yt-dlp.exe is missing
+    result = checker._check_ytdlp()
+    assert result.found is False
+    assert result.required is True
+    assert result.path is None
 
+    py_result = checker._check_ytdlp_python()
+    assert py_result.found is True
+    assert py_result.required is True
+    assert py_result.version is not None
+
+
+def test_ytdlp_bundled_exe_exits_nonzero(checker, monkeypatch):
+    exe = checker.BIN_DIR / "yt-dlp.exe"
+    exe.write_text("fake", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, returncode=1, stdout="", stderr="crash")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    result = checker._check_ytdlp()
+    assert result.found is False
+    assert result.required is True
+
+
+def test_ytdlp_bundled_exe_raises_execution_error(checker, monkeypatch):
+    exe = checker.BIN_DIR / "yt-dlp.exe"
+    exe.write_text("fake", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        raise OSError("cannot execute")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    result = checker._check_ytdlp()
+    assert result.found is False
+    assert result.required is True
+
+
+def test_ytdlp_bundled_exe_succeeds(checker, monkeypatch):
+    exe = checker.BIN_DIR / "yt-dlp.exe"
+    exe.write_text("fake", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout="2026.08.19\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
     result = checker._check_ytdlp()
     assert result.found is True
     assert result.required is True
-    assert result.version == yt_dlp.version.__version__
+    assert result.version == "2026.08.19"
+    assert result.path == str(exe)
 
 
-def test_ytdlp_missing_reports_required(checker, monkeypatch):
+def test_ytdlp_python_missing_reports_required(checker, monkeypatch):
     import builtins
 
     real_import = builtins.__import__
@@ -115,7 +160,7 @@ def test_ytdlp_missing_reports_required(checker, monkeypatch):
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
-    result = checker._check_ytdlp()
+    result = checker._check_ytdlp_python()
     assert result.found is False
     assert result.required is True
     assert result.path is None
@@ -167,7 +212,7 @@ def test_node_subprocess_failure_reports_unknown_version(checker, monkeypatch):
     assert result.required is False
 
 
-def test_check_all_returns_four_results(checker, no_which, monkeypatch):
+def test_check_all_returns_five_results(checker, no_which, monkeypatch):
     import builtins
 
     real_import = builtins.__import__
@@ -180,7 +225,9 @@ def test_check_all_returns_four_results(checker, no_which, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     results = checker.check_all()
-    assert len(results) == 4
+    assert len(results) == 5
     assert all(isinstance(r, DepResult) for r in results)
-    assert [r.name for r in results] == ["FFmpeg", "FFprobe", "Node.js", "yt-dlp"]
+    assert [r.name for r in results] == [
+        "FFmpeg", "FFprobe", "Node.js", "yt-dlp", "yt-dlp Python package"
+    ]
     assert all(r.found is False for r in results)

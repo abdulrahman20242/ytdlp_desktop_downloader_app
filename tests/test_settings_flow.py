@@ -336,3 +336,73 @@ def test_parse_int_clamps_out_of_range_back_to_default():
     below = _StringVarStub("-5")
     assert SettingsDialog._parse_int(below, 10, minimum=0, maximum=100) == 10
     assert below.get() == "10"
+
+
+def test_settings_dialog_save_failure_shows_error_and_keeps_dialog_open(monkeypatch):
+    import ui.settings_dialog as sd_module
+
+    class FailingConfig:
+        def set(self, key_path, value):
+            return False
+
+    dialog = object.__new__(SettingsDialog)
+    dialog.config = FailingConfig()
+    dialog.destroyed = False
+    dialog.destroy = lambda: setattr(dialog, "destroyed", True)
+
+    dialog._theme_var = _StringVarStub("dark")
+    dialog._dir_var = _StringVarStub("C:/Downloads")
+    dialog._quality_var = _StringVarStub("1080p")
+    dialog._mode_var = _StringVarStub("video")
+    dialog._fragments_var = _StringVarStub("4")
+    dialog._retries_var = _StringVarStub("10")
+    dialog._cookies_source_var = _StringVarStub("none")
+    dialog._browser_var = _StringVarStub("chrome")
+    dialog._debug_var = _StringVarStub(False)
+    dialog._sponsorblock_var = _StringVarStub(False)
+
+    shown_errors = []
+    monkeypatch.setattr(sd_module.messagebox, "showerror", lambda title, msg, **kw: shown_errors.append((title, msg)))
+
+    # Attempt save: must return False, show user error, and NOT destroy the dialog
+    result = dialog._save()
+    assert result is False
+    assert len(shown_errors) == 1
+    assert "تعذّر حفظ الإعدادات" in shown_errors[0][0]
+    assert dialog.destroyed is False
+
+
+def test_settings_dialog_save_success_destroys_dialog(monkeypatch):
+    import ui.settings_dialog as sd_module
+
+    saved_keys = []
+
+    class SuccessConfig:
+        def set(self, key_path, value):
+            saved_keys.append((key_path, value))
+            return True
+
+    dialog = object.__new__(SettingsDialog)
+    dialog.config = SuccessConfig()
+    dialog.destroyed = False
+    dialog.destroy = lambda: setattr(dialog, "destroyed", True)
+
+    dialog._theme_var = _StringVarStub("light")
+    dialog._dir_var = _StringVarStub("D:/Videos")
+    dialog._quality_var = _StringVarStub("720p")
+    dialog._mode_var = _StringVarStub("audio")
+    dialog._fragments_var = _StringVarStub("6")
+    dialog._retries_var = _StringVarStub("5")
+    dialog._cookies_source_var = _StringVarStub("browser")
+    dialog._browser_var = _StringVarStub("firefox")
+    dialog._debug_var = _StringVarStub(True)
+    dialog._sponsorblock_var = _StringVarStub(True)
+
+    shown_errors = []
+    monkeypatch.setattr(sd_module.messagebox, "showerror", lambda title, msg, **kw: shown_errors.append((title, msg)))
+
+    result = dialog._save()
+    assert result is True
+    assert len(shown_errors) == 0
+    assert dialog.destroyed is True
+    assert len(saved_keys) == 10

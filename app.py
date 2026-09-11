@@ -16,10 +16,10 @@ if str(app_root) not in sys.path:
 # found when yt-dlp loads its bundled yt-dlp-ejs JavaScript solver.
 os.environ["PATH"] = str(bin_dir()) + os.pathsep + os.environ.get("PATH", "")
 
-import customtkinter as ctk
-from core.config_manager import ConfigManager
-from ui.main_window import MainWindow
-from ui.startup_check import StartupCheckFrame
+import customtkinter as ctk  # noqa: E402
+from core.config_manager import ConfigManager  # noqa: E402
+from ui.main_window import MainWindow  # noqa: E402
+from ui.startup_check import StartupCheckFrame  # noqa: E402
 
 
 def main():

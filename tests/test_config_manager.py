@@ -1,11 +1,11 @@
 import json
+from pathlib import Path
 
 from core.config_manager import ConfigManager
 
 
 def test_defaults_are_loaded_when_no_config_file(config):
     assert config.get("ui.theme") == "dark"
-    assert config.get("ui.language") == "ar"
     assert config.get("download.default_quality") == "1080p"
     assert config.get("download.retries") == 10
     assert config.get("download.merge_output_format") == "mp4"
@@ -14,6 +14,7 @@ def test_defaults_are_loaded_when_no_config_file(config):
 def test_removed_fake_settings_no_longer_in_defaults(config):
     # Keys that had no UI and no runtime effect were dropped from the schema.
     for key in (
+        "ui.language",
         "download.embed_thumbnail",
         "download.embed_metadata",
         "download.write_subs",
@@ -140,14 +141,84 @@ def test_partial_saved_values_survive_reload_with_defaults(config, tmp_path):
     assert reloaded.get("ui.theme") == "dark"
 
 
-def test_non_dict_override_of_default_section_is_kept_not_crashing(config, tmp_path):
-    # _merge must tolerate a saved value that replaces a default dict section
+def test_scalar_section_restores_default_dictionary_structure(config, tmp_path):
     (tmp_path / "config.json").write_text(
-        json.dumps({"download": "a string instead of a dict"}), encoding="utf-8"
+        json.dumps({"download": "not-an-object"}), encoding="utf-8"
     )
     reloaded = ConfigManager()
-    assert reloaded.get("download") == "a string instead of a dict"
+    assert isinstance(reloaded.get("download"), dict)
+    assert reloaded.get("download.retries") == 10
     assert reloaded.get("ui.theme") == "dark"
+
+
+def test_list_section_restores_default_dictionary_structure(config, tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps({"download": [1, 2, 3]}), encoding="utf-8"
+    )
+    reloaded = ConfigManager()
+    assert isinstance(reloaded.get("download"), dict)
+    assert reloaded.get("download.retries") == 10
+
+
+def test_null_section_restores_default_dictionary_structure(config, tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps({"download": None, "cookies": None}), encoding="utf-8"
+    )
+    reloaded = ConfigManager()
+    assert isinstance(reloaded.get("download"), dict)
+    assert isinstance(reloaded.get("cookies"), dict)
+    assert reloaded.get("download.retries") == 10
+    assert reloaded.get("cookies.browser") == "chrome"
+
+
+def test_corrupt_section_preserves_unrelated_valid_settings(config, tmp_path):
+    (tmp_path / "config.json").write_text(
+        json.dumps({
+            "download": "broken-scalar",
+            "ui": {"theme": "light"},
+            "custom_key": "unrelated_value",
+        }),
+        encoding="utf-8",
+    )
+    reloaded = ConfigManager()
+    assert isinstance(reloaded.get("download"), dict)
+    assert reloaded.get("ui.theme") == "light"
+    assert reloaded.get("custom_key") == "unrelated_value"
+
+
+def test_nested_set_replaces_invalid_intermediate_nodes(config, tmp_path):
+    # If in-memory or persisted config had a scalar intermediate node
+    config._data["download"] = "broken"
+    assert config.set("download.default_dir", "/custom/download") is True
+    assert config.get("download.default_dir") == "/custom/download"
+    assert isinstance(config.get("download"), dict)
+
+    # Deeply nested case
+    config._data["deep"] = 42
+    assert config.set("deep.nested.leaf", "success") is True
+    assert config.get("deep.nested.leaf") == "success"
+
+
+def test_migration_sanitizes_developer_repository_path():
+    dev_path = "F:/projects/Python Projects/yt-dlp/ytdlp_desktop_downloader_app/downloads"
+    assert ConfigManager._is_repository_path(dev_path) is True
+    sanitized = ConfigManager()._sanitize_legacy_settings({"download": {"default_dir": dev_path}})
+    assert sanitized["download"]["default_dir"] != dev_path
+    assert "YTDownloader" in sanitized["download"]["default_dir"]
+
+
+def test_migration_preserves_legitimate_user_absolute_path():
+    custom_abs = str(Path.home() / "my_user_downloads")
+    assert ConfigManager._is_repository_path(custom_abs) is False
+    sanitized = ConfigManager()._sanitize_legacy_settings({"download": {"default_dir": custom_abs}})
+    assert sanitized["download"]["default_dir"] == custom_abs
+
+
+def test_migration_preserves_relative_path():
+    rel_path = "downloads_folder"
+    assert ConfigManager._is_repository_path(rel_path) is False
+    sanitized = ConfigManager()._sanitize_legacy_settings({"download": {"default_dir": rel_path}})
+    assert sanitized["download"]["default_dir"] == rel_path
 
 
 def test_save_after_malformed_recovery_persists_valid_config(config, tmp_path):
@@ -161,7 +232,7 @@ def test_save_after_malformed_recovery_persists_valid_config(config, tmp_path):
 
 
 def test_save_is_atomic_and_leaves_no_tmp_behind(config, tmp_path):
-    config.set("ui.theme", "light")
+    assert config.set("ui.theme", "light") is True
     assert not list(tmp_path.glob("config.json.tmp"))
     assert json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))["ui"]["theme"] == "light"
 
@@ -173,7 +244,9 @@ def test_save_failure_is_tolerated_and_cleans_temp(config, tmp_path, monkeypatch
         raise OSError("disk full")
 
     monkeypatch.setattr(cm.os, "replace", boom_replace)
-    config.set("ui.theme", "light")
-    # value still live in memory, no exception to the caller, no tmp litter
+    # Save failure returns False explicitly
+    result = config.set("ui.theme", "light")
+    assert result is False
+    # value still live in memory, no tmp litter
     assert config.get("ui.theme") == "light"
     assert not list(tmp_path.glob("config.json.tmp"))

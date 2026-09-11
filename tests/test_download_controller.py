@@ -13,6 +13,7 @@ from core.download_controller import (
     _parse_destination,
     _parse_progress,
     _strip_ytdlp_report_suffix,
+    _terminate_tree,
 )
 
 
@@ -56,9 +57,9 @@ class _KillableProc:
         self.terminated = False
 
     def poll(self):
-        return None
+        return 0 if self.terminated else None
 
-    def wait(self):
+    def wait(self, timeout=None):
         return 0
 
     def terminate(self):
@@ -766,3 +767,86 @@ def test_is_downloading_reflects_thread_state():
     c._thread = t
     assert c.is_downloading() is True
     t.join(timeout=0.01)
+
+
+# --------------------------------------------------------------------- #
+#  AUD-006: Process tree termination hardening tests
+# --------------------------------------------------------------------- #
+
+
+def test_terminate_tree_taskkill_success(monkeypatch):
+    monkeypatch.setattr("os.name", "nt")
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    proc = _KillableProc(pid=5555)
+
+    assert _terminate_tree(proc) is True
+    assert len(calls) == 1
+    assert calls[0] == ["taskkill", "/PID", "5555", "/T", "/F"]
+    # Taskkill succeeded, direct terminate was not needed
+    assert proc.terminated is False
+
+
+def test_terminate_tree_taskkill_nonzero_fallback(monkeypatch):
+    monkeypatch.setattr("os.name", "nt")
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, returncode=1)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    proc = _KillableProc(pid=5556)
+
+    # Non-zero taskkill falls back to direct proc.terminate()
+    assert _terminate_tree(proc) is True
+    assert proc.terminated is True
+
+
+def test_terminate_tree_taskkill_exception_fallback(monkeypatch):
+    monkeypatch.setattr("os.name", "nt")
+
+    def boom(cmd, **kwargs):
+        raise OSError("taskkill error")
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    proc = _KillableProc(pid=5557)
+
+    # Exception in taskkill falls back to direct proc.terminate()
+    assert _terminate_tree(proc) is True
+    assert proc.terminated is True
+
+
+def test_terminate_tree_already_exited_process():
+    proc = _KillableProc(pid=5558)
+    proc.terminated = True  # poll() returns 0
+    assert _terminate_tree(proc) is True
+
+    assert _terminate_tree(None) is True
+
+
+def test_terminate_tree_direct_terminate_fallback(monkeypatch):
+    monkeypatch.setattr("os.name", "posix")
+    proc = _KillableProc(pid=5559)
+
+    assert _terminate_tree(proc) is True
+    assert proc.terminated is True
+
+
+def test_terminate_tree_bounded_wait_timeout(monkeypatch):
+    monkeypatch.setattr("os.name", "posix")
+
+    class _HangingProc(_KillableProc):
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired(cmd="hanging", timeout=3.0)
+
+    proc = _HangingProc(pid=5560)
+    # If wait times out, cleanup could not be confirmed -> returns False
+    assert _terminate_tree(proc) is False
+    assert proc.terminated is True

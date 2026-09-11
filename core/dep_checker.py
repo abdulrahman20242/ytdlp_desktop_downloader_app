@@ -26,6 +26,7 @@ class DependencyChecker:
             self._check_ffprobe(),
             self._check_node(),
             self._check_ytdlp(),
+            self._check_ytdlp_python(),
         ]
 
     def _check_ffmpeg(self) -> DepResult:
@@ -81,9 +82,27 @@ class DependencyChecker:
         return DepResult("Node.js", False, None, None, required=False)
 
     def _check_ytdlp(self) -> DepResult:
+        path = self.BIN_DIR / "yt-dlp.exe"
+        if not path.exists():
+            return DepResult("yt-dlp", False, None, None, required=True)
+        try:
+            completed = subprocess.run(
+                [str(path), "--version"], capture_output=True, text=True,
+                creationflags=_CREATE_NO_WINDOW, timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return DepResult("yt-dlp", False, None, None, required=True)
+        if completed.returncode != 0:
+            return DepResult("yt-dlp", False, str(path), None, required=True)
+        output = completed.stdout.strip()
+        version = output.splitlines()[0] if output else "unknown"
+        return DepResult("yt-dlp", True, str(path), version, required=True)
+
+    @staticmethod
+    def _check_ytdlp_python() -> DepResult:
         try:
             import yt_dlp
-            ver = getattr(yt_dlp.version, "__version__", "unknown")
-            return DepResult("yt-dlp", True, yt_dlp.__file__, ver, required=True)
+            version = getattr(yt_dlp.version, "__version__", "unknown")
+            return DepResult("yt-dlp Python package", True, yt_dlp.__file__, version, required=True)
         except ImportError:
-            return DepResult("yt-dlp", False, None, None, required=True)
+            return DepResult("yt-dlp Python package", False, None, None, required=True)

@@ -1,3 +1,4 @@
+import logging
 import os
 import queue
 import re
@@ -12,6 +13,8 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _PROGRESS_RE = re.compile(r"\[download\]\s+([\d.]+)%")
 _SPEED_RE = re.compile(r"\bat\s+([^\s]+)\s+ETA")
 _ETA_RE = re.compile(r"ETA\s+([^\s)]+)")
+_TERMINATE_WAIT_SECONDS = 3.0
+LOGGER = logging.getLogger(__name__)
 
 
 def _strip_ansi(line: str) -> str:
@@ -72,40 +75,75 @@ def _parse_destination(line: str) -> str | None:
     return None
 
 
-def _terminate_tree(proc):
-    """Terminate a subprocess and, on Windows, its whole descendant tree.
-
-    yt-dlp spawns a child ffmpeg/ffprobe for merging and remuxing. Killing only
-    the top-level process orphans those children, which keep running and can
-    leave temp files behind. ``taskkill /T`` kills the entire tree, with a
-    plain ``terminate()`` as the portable fallback. A no-op when the process is
-    absent or already finished.
-    """
+def _wait_for_exit(proc) -> bool:
     if proc is None:
-        return
+        return True
     poll = getattr(proc, "poll", None)
     if callable(poll) and poll() is not None:
-        return
+        return True
+    wait_fn = getattr(proc, "wait", None)
+    if not callable(wait_fn):
+        return True
     try:
-        pid = proc.pid
-    except Exception:
-        return
-    if os.name == "nt":
-        if pid is not None:
-            try:
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/T", "/F"],
-                    capture_output=True,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                )
-                return
-            except Exception:
-                pass
-    try:
-        proc.terminate()
-    except Exception:
-        pass
+        try:
+            wait_fn(timeout=_TERMINATE_WAIT_SECONDS)
+        except TypeError:
+            wait_fn()
+        return True
+    except subprocess.TimeoutExpired:
+        LOGGER.error("Timed out waiting for process %s to terminate", getattr(proc, "pid", None))
+        return False
+    except ProcessLookupError:
+        return True
+    except OSError as exc:
+        LOGGER.error("Could not wait for process %s: %s", getattr(proc, "pid", None), exc)
+        return False
 
+
+def _terminate_directly(proc) -> bool:
+    if proc is None:
+        return True
+    poll = getattr(proc, "poll", None)
+    if callable(poll) and poll() is not None:
+        return True
+    terminate_fn = getattr(proc, "terminate", None)
+    if callable(terminate_fn):
+        try:
+            terminate_fn()
+        except ProcessLookupError:
+            return True
+        except OSError as exc:
+            LOGGER.error("Could not terminate process %s: %s", getattr(proc, "pid", None), exc)
+            return False
+    return _wait_for_exit(proc)
+
+
+def _terminate_tree(proc) -> bool:
+    """Terminate a subprocess tree and return whether cleanup was confirmed."""
+    if proc is None:
+        return True
+    poll = getattr(proc, "poll", None)
+    if callable(poll) and poll() is not None:
+        return True
+    pid = getattr(proc, "pid", None)
+    if os.name == "nt" and pid is not None:
+        try:
+            taskkill = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                timeout=_TERMINATE_WAIT_SECONDS,
+            )
+            if taskkill.returncode == 0 and _wait_for_exit(proc):
+                return True
+            LOGGER.warning(
+                "taskkill did not confirm cleanup for process %s (exit code %s)",
+                pid,
+                taskkill.returncode,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            LOGGER.warning("taskkill could not terminate process %s: %s", pid, exc)
+    return _terminate_directly(proc)
 
 def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
     base_bin = bin_dir()

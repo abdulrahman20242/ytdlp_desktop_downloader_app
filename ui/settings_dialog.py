@@ -1,6 +1,7 @@
 import customtkinter as ctk
 from pathlib import Path
 import tkinter.filedialog as fd
+import tkinter.messagebox as messagebox
 
 
 class SettingsDialog(ctk.CTkToplevel):
@@ -44,17 +45,10 @@ class SettingsDialog(ctk.CTkToplevel):
         )
         self._theme_menu.grid(row=0, column=1, sticky="ew", pady=5, padx=(5, 0))
 
-        self._lang_var = ctk.StringVar()
-        ctk.CTkLabel(self._general_tab, text="اللغة:").grid(row=1, column=0, sticky="w", pady=5)
-        self._lang_menu = ctk.CTkOptionMenu(
-            self._general_tab, variable=self._lang_var, values=["ar", "en"]
-        )
-        self._lang_menu.grid(row=1, column=1, sticky="ew", pady=5, padx=(5, 0))
-
         self._dir_var = ctk.StringVar()
-        ctk.CTkLabel(self._general_tab, text="مجلد الحفظ:").grid(row=2, column=0, sticky="w", pady=5)
+        ctk.CTkLabel(self._general_tab, text="مجلد الحفظ:").grid(row=1, column=0, sticky="w", pady=5)
         dir_frame = ctk.CTkFrame(self._general_tab, fg_color="transparent")
-        dir_frame.grid(row=2, column=1, sticky="ew", pady=5, padx=(5, 0))
+        dir_frame.grid(row=1, column=1, sticky="ew", pady=5, padx=(5, 0))
         dir_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkEntry(dir_frame, textvariable=self._dir_var).grid(row=0, column=0, sticky="ew", padx=(0, 5))
         ctk.CTkButton(dir_frame, text="...", width=30, command=self._browse_dir).grid(row=0, column=1)
@@ -77,7 +71,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self._mode_menu.grid(row=1, column=1, sticky="ew", pady=5, padx=(5, 0))
 
         self._fragments_var = ctk.StringVar()
-        ctk.CTkLabel(self._download_tab, text="تحميل متوازي (fragments):").grid(row=2, column=0, sticky="w", pady=5)
+        ctk.CTkLabel(self._download_tab, text="تحميل متوازي (fragments):").grid(row=1, column=0, sticky="w", pady=5)
         self._fragments_spin = ctk.CTkEntry(self._download_tab, textvariable=self._fragments_var, width=60)
         self._fragments_spin.grid(row=2, column=1, sticky="w", pady=5, padx=(5, 0))
 
@@ -124,7 +118,6 @@ class SettingsDialog(ctk.CTkToplevel):
 
     def _load_config(self):
         self._theme_var.set(self.config.get("ui.theme", "dark"))
-        self._lang_var.set(self.config.get("ui.language", "ar"))
         self._dir_var.set(self.config.get("download.default_dir", ""))
         self._quality_var.set(self.config.get("download.default_quality", "1080p"))
         self._mode_var.set(self.config.get("download.default_mode", "video"))
@@ -150,16 +143,26 @@ class SettingsDialog(ctk.CTkToplevel):
         var.set(str(value))
         return value
 
-    def _save(self):
-        self.config.set("ui.theme", self._theme_var.get())
-        self.config.set("ui.language", self._lang_var.get())
-        self.config.set("download.default_dir", self._dir_var.get())
-        self.config.set("download.default_quality", self._quality_var.get())
-        self.config.set("download.default_mode", self._mode_var.get())
-        self.config.set("download.concurrent_fragments", self._parse_int(self._fragments_var, 4, minimum=1, maximum=16))
-        self.config.set("download.retries", self._parse_int(self._retries_var, 10, minimum=0, maximum=100))
-        self.config.set("cookies.source", self._cookies_source_var.get())
-        self.config.set("cookies.browser", self._browser_var.get())
-        self.config.set("advanced.show_debug_logs", self._debug_var.get())
-        self.config.set("advanced.sponsorblock_remove", self._sponsorblock_var.get())
+    def _save(self) -> bool:
+        settings = (
+            ("ui.theme", self._theme_var.get()),
+            ("download.default_dir", self._dir_var.get()),
+            ("download.default_quality", self._quality_var.get()),
+            ("download.default_mode", self._mode_var.get()),
+            ("download.concurrent_fragments", self._parse_int(self._fragments_var, 4, minimum=1, maximum=16)),
+            ("download.retries", self._parse_int(self._retries_var, 10, minimum=0, maximum=100)),
+            ("cookies.source", self._cookies_source_var.get()),
+            ("cookies.browser", self._browser_var.get()),
+            ("advanced.show_debug_logs", self._debug_var.get()),
+            ("advanced.sponsorblock_remove", self._sponsorblock_var.get()),
+        )
+        for key_path, setting_value in settings:
+            if not self.config.set(key_path, setting_value):
+                messagebox.showerror(
+                    "تعذّر حفظ الإعدادات",
+                    "لم يتم حفظ الإعدادات. تحقق من صلاحيات مجلد التطبيق ثم أعد المحاولة.",
+                    parent=self,
+                )
+                return False
         self.destroy()
+        return True

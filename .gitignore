@@ -4,7 +4,6 @@ venv/
 .venv/
 
 # Build outputs
-build_assets/build/
 build/
 dist/
 Release/
@@ -12,13 +11,13 @@ Release/
 # Project Files
 bin/cookies.txt
 data/cookies.txt
-downloads/
 logs/
 .opencode
+.agents
 .codex
 graphify-out
 .coverage
-
+.pytest_temp
 # Media
 *.mp4
 *.webm
