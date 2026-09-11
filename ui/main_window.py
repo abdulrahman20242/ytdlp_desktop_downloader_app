@@ -13,6 +13,7 @@ from ui.logs_panel import LogsPanel
 from ui.quality_selector import QualitySelector
 from ui.settings_dialog import SettingsDialog
 from ui.playlist_panel import PlaylistPanel
+from core import __version__
 from core.download_controller import DownloadController
 from core.format_builder import build_format_opts, get_common_opts
 from core.info_extractor import (
@@ -102,7 +103,7 @@ class MainWindow(ctk.CTkFrame):
         header.grid(row=0, column=0, pady=(5, 2))
 
         sub_header = ctk.CTkLabel(
-            self, text="YouTube Video & Audio Downloader", font=("", 12),
+            self, text=f"YouTube Video & Audio Downloader v{__version__}", font=("", 12),
             text_color="gray"
         )
         sub_header.grid(row=1, column=0, pady=(0, 3))

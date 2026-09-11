@@ -22,6 +22,9 @@ from ui.main_window import MainWindow  # noqa: E402
 from ui.startup_check import StartupCheckFrame  # noqa: E402
 
 
+__version__ = "1.0.0"
+
+
 def main():
     config = ConfigManager()
 
@@ -34,7 +37,7 @@ def main():
     ctk.set_appearance_mode(config.get("ui.theme", "dark"))
 
     root = ctk.CTk()
-    root.title("YT Downloader")
+    root.title(f"YT Downloader v{__version__}")
     w = config.get("ui.window_width", 800)
     h = config.get("ui.window_height", 600)
     root.geometry(f"{w}x{h}")

@@ -1,4 +1,4 @@
-# YT Downloader
+# YT Downloader v1.0.0
 
 A Windows desktop application for downloading YouTube videos, audio, and playlists using `yt-dlp`.
 
@@ -126,7 +126,7 @@ Settings are stored in `%APPDATA%\YTDownloader\config.json` (e.g. `C:\Users\<you
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.0.0",
   "ui": {
     "theme": "dark",
     "language": "ar",

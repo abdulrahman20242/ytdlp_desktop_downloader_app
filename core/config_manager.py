@@ -14,7 +14,7 @@ _BACKUP_SUFFIX = ".bak"
 _TMP_SUFFIX = ".tmp"
 
 _DEFAULTS = {
-    "version": "1.0",
+    "version": "1.0.0",
     "ui": {
         "theme": "dark",
         "window_width": 800,
