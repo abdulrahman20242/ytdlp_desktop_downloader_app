@@ -225,9 +225,88 @@ def test_check_all_returns_five_results(checker, no_which, monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
 
     results = checker.check_all()
+    # 5 base results, no mismatch entry because neither yt-dlp is found
     assert len(results) == 5
     assert all(isinstance(r, DepResult) for r in results)
     assert [r.name for r in results] == [
         "FFmpeg", "FFprobe", "Node.js", "yt-dlp", "yt-dlp Python package"
     ]
     assert all(r.found is False for r in results)
+
+
+# ------------------------------------------------------------------ #
+#  Version consistency checks
+# ------------------------------------------------------------------ #
+
+
+def test_version_consistency_matching_versions():
+    """No mismatch entry when both versions match."""
+    results = [
+        DepResult("yt-dlp", True, "/bin/yt-dlp.exe", "2026.08.19", required=True),
+        DepResult("yt-dlp Python package", True, "/lib/yt_dlp", "2026.08.19", required=True),
+    ]
+    assert DependencyChecker._check_version_consistency(results) is None
+
+
+def test_version_consistency_mismatched_versions():
+    """Mismatch entry when versions differ."""
+    results = [
+        DepResult("yt-dlp", True, "/bin/yt-dlp.exe", "2026.08.19", required=True),
+        DepResult("yt-dlp Python package", True, "/lib/yt_dlp", "2026.07.01", required=True),
+    ]
+    mismatch = DependencyChecker._check_version_consistency(results)
+    assert mismatch is not None
+    assert mismatch.name == "yt-dlp version sync"
+    assert mismatch.found is True
+    assert mismatch.required is False
+    assert "2026.08.19" in mismatch.version
+    assert "2026.07.01" in mismatch.version
+
+
+def test_version_consistency_exe_missing():
+    """No mismatch when the EXE is not found."""
+    results = [
+        DepResult("yt-dlp", False, None, None, required=True),
+        DepResult("yt-dlp Python package", True, "/lib/yt_dlp", "2026.08.19", required=True),
+    ]
+    assert DependencyChecker._check_version_consistency(results) is None
+
+
+def test_version_consistency_python_missing():
+    """No mismatch when the Python package is not found."""
+    results = [
+        DepResult("yt-dlp", True, "/bin/yt-dlp.exe", "2026.08.19", required=True),
+        DepResult("yt-dlp Python package", False, None, None, required=True),
+    ]
+    assert DependencyChecker._check_version_consistency(results) is None
+
+
+def test_check_all_includes_mismatch_when_versions_differ(checker, monkeypatch):
+    """check_all appends a 6th entry when the two yt-dlp versions disagree."""
+    exe = checker.BIN_DIR / "yt-dlp.exe"
+    exe.write_text("fake", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, returncode=0, stdout="2026.09.01\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    # The Python package reports its real installed version — as long as it
+    # doesn't happen to be "2026.09.01" the mismatch will trigger.  We
+    # explicitly mock it to a known different value.
+    import types
+    fake_mod = types.ModuleType("yt_dlp")
+    fake_mod.__file__ = "/fake/yt_dlp/__init__.py"
+    fake_version = types.ModuleType("yt_dlp.version")
+    fake_version.__version__ = "2026.07.15"
+    fake_mod.version = fake_version
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp", fake_mod)
+    monkeypatch.setitem(__import__("sys").modules, "yt_dlp.version", fake_version)
+
+    results = checker.check_all()
+    names = [r.name for r in results]
+    assert "yt-dlp version sync" in names
+    sync = [r for r in results if r.name == "yt-dlp version sync"][0]
+    assert sync.required is False
+    assert "2026.09.01" in sync.version
+    assert "2026.07.15" in sync.version
