@@ -192,6 +192,8 @@ class MainWindow(ctk.CTkFrame):
         ctk.CTkLabel(dir_frame, text="مجلد الحفظ:").grid(row=0, column=0, padx=(5, 5))
         self._dir_var = ctk.StringVar()
         self._dir_entry = ctk.CTkEntry(dir_frame, textvariable=self._dir_var)
+        self._dir_entry.bind("<Return>", lambda e: self._persist_dir(self._dir_var))
+        self._dir_entry.bind("<FocusOut>", lambda e: self._persist_dir(self._dir_var))
         self._dir_entry.grid(row=0, column=1, sticky="ew", padx=(0, 5))
         ctk.CTkButton(
             dir_frame, text="تصفح", width=60,
@@ -282,6 +284,8 @@ class MainWindow(ctk.CTkFrame):
         self._playlist_dir_entry = ctk.CTkEntry(
             pl_dir_frame, textvariable=self._playlist_dir_var
         )
+        self._playlist_dir_entry.bind("<Return>", lambda e: self._persist_dir(self._playlist_dir_var))
+        self._playlist_dir_entry.bind("<FocusOut>", lambda e: self._persist_dir(self._playlist_dir_var))
         self._playlist_dir_entry.grid(row=0, column=1, sticky="ew", padx=(0, 5))
         ctk.CTkButton(
             pl_dir_frame, text="تصفح", width=60,
@@ -577,6 +581,12 @@ class MainWindow(ctk.CTkFrame):
     #  Directories / settings
     # ------------------------------------------------------------------ #
 
+    def _persist_dir(self, var):
+        current = var.get().strip()
+        saved = self.config.get("download.default_dir", "")
+        if current and current != saved:
+            self.config.set("download.default_dir", current)
+
     def _browse_dir(self, var):
         path = fd.askdirectory(
             title="اختر مجلد الحفظ",
@@ -584,7 +594,7 @@ class MainWindow(ctk.CTkFrame):
         )
         if path:
             var.set(path)
-            self.config.set("download.default_dir", path)
+            self._persist_dir(var)
 
     def _on_close(self):
         saved = self.config.get("download.default_dir", "")
@@ -673,7 +683,9 @@ class MainWindow(ctk.CTkFrame):
 
     def _resolve_dir(self, var, log=None) -> Path:
         raw = var.get().strip()
-        if not raw:
+        if raw:
+            self._persist_dir(var)
+        else:
             raw = self.config.get("download.default_dir", "")
         save_dir = Path(raw or get_downloads_dir())
         try:

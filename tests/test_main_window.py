@@ -935,6 +935,38 @@ def test_resolve_dir_falls_back_to_config_default(monkeypatch, tmp_path):
     assert mw._resolve_dir(mw._dir_var) == out
 
 
+def test_persist_dir_saves_typed_path_when_differs():
+    mw = _wired_window()
+    mw.config = _FakeConfig({"download": {"default_dir": "C:\\saved"}})
+    mw._dir_var.set("C:\\typed")
+    mw._persist_dir(mw._dir_var)
+    assert mw.config.get("download.default_dir") == "C:\\typed"
+
+
+def test_persist_dir_skips_save_when_empty_or_unchanged():
+    mw = _wired_window()
+    mw.config = _FakeConfig({"download": {"default_dir": "C:\\saved"}})
+    mw._dir_var.set("C:\\saved")
+    mw._persist_dir(mw._dir_var)
+    mw._dir_var.set("  ")
+    mw._persist_dir(mw._dir_var)
+    mw._playlist_dir_var.set("C:\\saved")
+    mw._persist_dir(mw._playlist_dir_var)
+    assert mw.config.sets == []
+    assert mw.config.get("download.default_dir") == "C:\\saved"
+
+
+def test_resolve_dir_persists_typed_dir_at_download_time(monkeypatch, tmp_path):
+    out = tmp_path / "selected"
+    monkeypatch.setattr(mw_module, "ensure_dir", lambda path: path)
+    monkeypatch.setattr(mw_module, "get_downloads_dir", lambda: tmp_path / "dl")
+    mw = _wired_window()
+    mw.config = _FakeConfig({"download": {"default_dir": "C:\\saved"}})
+    mw._dir_var.set(str(out))
+    assert mw._resolve_dir(mw._dir_var) == out
+    assert mw.config.get("download.default_dir") == str(out)
+
+
 def test_resolve_dir_warns_and_uses_downloads_fallback(monkeypatch, tmp_path):
     fb = tmp_path / "dl"
     shown = []
