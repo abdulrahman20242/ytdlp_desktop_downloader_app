@@ -41,18 +41,95 @@ $Release    = Join-Path $Root "Release"
 $AppDir     = Join-Path $Release "YT Downloader"
 $BinExes    = @("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe", "node.exe")
 
+function Stop-LockedProcesses {
+    param([string]$TargetDir)
+    if (-not (Test-Path $TargetDir)) { return }
+    $procs = Get-Process "YT Downloader", "YTDownloaderCore", "yt-dlp", "ffmpeg", "ffprobe", "node" -ErrorAction SilentlyContinue
+    foreach ($proc in $procs) {
+        try {
+            $pPath = $proc.Path
+            if ($pPath -and $pPath.StartsWith($TargetDir, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Write-Host "  Stopping process locking build folder: $($proc.ProcessName) (PID $($proc.Id))" -ForegroundColor Yellow
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            # Ignore access errors for processes owned by other users
+        }
+    }
+    Start-Sleep -Milliseconds 250
+}
+
+function Safe-RemoveDirectory {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) { return }
+    Stop-LockedProcesses -TargetDir $Path
+    for ($i = 1; $i -le 3; $i++) {
+        try {
+            Remove-Item $Path -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            if ($i -eq 3) {
+                throw "Could not clean directory '$Path' (file is locked or in use by another process).`nError: $($_.Exception.Message)"
+            }
+            Write-Host "  Retrying directory cleanup ($i/3): $Path..." -ForegroundColor Yellow
+            Start-Sleep -Milliseconds 600
+            Stop-LockedProcesses -TargetDir $Path
+        }
+    }
+}
+
+function Check-Prerequisites {
+    Write-Host "==> Checking build prerequisites..." -ForegroundColor Cyan
+
+    # 1. dotnet CLI
+    $dotnet = Get-Command "dotnet" -ErrorAction SilentlyContinue
+    if (-not $dotnet) {
+        throw "Prerequisite missing: .NET SDK ('dotnet' CLI) is required to build the launcher. Please install .NET SDK or Visual Studio Build Tools."
+    }
+
+    # 2. Python & packages
+    $py = Get-Command "python" -ErrorAction SilentlyContinue
+    if (-not $py) {
+        throw "Prerequisite missing: Python is not available in PATH."
+    }
+
+    & python -c "import PyInstaller, PIL, customtkinter" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Prerequisite missing: Required Python packages (PyInstaller, pillow, customtkinter) are not installed in the active environment."
+    }
+
+    # 3. Binaries under bin/
+    foreach ($exe in $BinExes) {
+        $p = Join-Path $Root "bin\$exe"
+        if (-not (Test-Path $p)) {
+            throw "Prerequisite missing: Bundled binary not found: $p`nPlease place yt-dlp.exe, ffmpeg.exe, ffprobe.exe, and node.exe in the bin/ directory before building."
+        }
+    }
+
+    Write-Host "  [ok] .NET SDK available"
+    Write-Host "  [ok] Python & build packages available"
+    Write-Host "  [ok] All required binaries found in bin\"
+}
+
 function Invoke-Step {
     param([string]$Title, [scriptblock]$Body)
     Write-Host "`n==> $Title" -ForegroundColor Cyan
+    $global:LASTEXITCODE = 0
     & $Body
     if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {
         throw "Step failed with exit code ${LASTEXITCODE}: $Title"
     }
 }
 
+# Stop any old running release instances before starting
+Stop-LockedProcesses -TargetDir $Release
+
+# Fast pre-flight check
+Check-Prerequisites
+
 if (-not $SkipTests) {
     Invoke-Step "Running tests" {
-        python -m pytest (Join-Path $Root "tests") -q
+        python -m pytest $Root -q
     }
 }
 
@@ -69,7 +146,7 @@ Invoke-Step "Building PyInstaller onedir core" {
 }
 
 Invoke-Step "Assembling Release layout" {
-    if (Test-Path $Release) { Remove-Item $Release -Recurse -Force }
+    Safe-RemoveDirectory -Path $Release
     New-Item -ItemType Directory -Force -Path $AppDir, "$AppDir\bin", "$AppDir\assets" | Out-Null
 
     Copy-Item (Join-Path $DistCore "YTDownloaderCore.exe") $AppDir
@@ -81,7 +158,12 @@ Invoke-Step "Assembling Release layout" {
     if (Test-Path (Join-Path $Root "assets\fonts")) {
         Copy-Item (Join-Path $Root "assets\fonts") "$AppDir\assets\fonts" -Recurse -Force
     }
-    Copy-Item (Join-Path $Root "build_assets\build\logo.ico") "$AppDir\assets\logo.ico"
+
+    $builtIcon = Join-Path $Root "build_assets\build\logo.ico"
+    if (Test-Path $builtIcon) {
+        Copy-Item $builtIcon "$AppDir\assets\logo.ico"
+        Copy-Item $builtIcon (Join-Path $Root "assets\logo.ico") -Force
+    }
 
     Copy-Item (Join-Path $LaunchOut "YT Downloader.exe") $Release
     if (Test-Path (Join-Path $LaunchOut "YT Downloader.exe.config")) {
@@ -118,6 +200,7 @@ Invoke-Step "Validating bundle" {
     finally {
         Remove-Item Env:YTDLP_DESKTOP_SELFTEST -ErrorAction SilentlyContinue
         Pop-Location
+        Stop-LockedProcesses -TargetDir $Release
     }
 
     Write-Host "  Binaries from the packaged bin\:" 

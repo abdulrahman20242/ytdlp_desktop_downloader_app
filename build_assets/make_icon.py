@@ -57,6 +57,11 @@ def main() -> int:
         append_images=frames[1:],
     )
     print(f"[icon] written {OUT} ({OUT.stat().st_size} bytes)")
+    assets_ico = Path(__file__).resolve().parent.parent / "assets" / "logo.ico"
+    assets_ico.parent.mkdir(parents=True, exist_ok=True)
+    import shutil
+    shutil.copy2(OUT, assets_ico)
+    print(f"[icon] copied {assets_ico}")
     return 0
 
 

@@ -15,6 +15,15 @@ never inside ``_internal``, so relocation keeps working.
 import os
 
 icon = os.path.join(SPECPATH, "build_assets", "build", "logo.ico")
+if not os.path.exists(icon):
+    try:
+        import sys
+        if SPECPATH not in sys.path:
+            sys.path.insert(0, SPECPATH)
+        from build_assets.make_icon import main as make_icon_main
+        make_icon_main()
+    except Exception:
+        icon = None
 
 a = Analysis(
     ["app.py"],
