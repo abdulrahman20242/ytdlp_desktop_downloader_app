@@ -340,6 +340,21 @@ class MainWindow(ctk.CTkFrame):
 
     def _on_tab_changed(self, *_):
         self._active_page = self._tabview.get()
+        source_var = (
+            getattr(self, "_playlist_dir_var", None)
+            if self._active_page == _VIDEO_TAB
+            else getattr(self, "_dir_var", None)
+        )
+        target_var = (
+            getattr(self, "_dir_var", None)
+            if self._active_page == _VIDEO_TAB
+            else getattr(self, "_playlist_dir_var", None)
+        )
+        if source_var is not None and target_var is not None:
+            val = source_var.get().strip()
+            if val and val != target_var.get().strip():
+                target_var.set(val)
+                self._persist_dir(source_var)
         if self._active_page == _PLAYLIST_TAB:
             # Re-sync the playlist scroll region after the tab becomes visible.
             self._playlist_panel.show()
@@ -586,6 +601,10 @@ class MainWindow(ctk.CTkFrame):
         saved = self.config.get("download.default_dir", "")
         if current and current != saved:
             self.config.set("download.default_dir", current)
+        if current:
+            for other_var in (getattr(self, "_dir_var", None), getattr(self, "_playlist_dir_var", None)):
+                if other_var is not None and other_var is not var and other_var.get().strip() != current:
+                    other_var.set(current)
 
     def _browse_dir(self, var):
         path = fd.askdirectory(
@@ -596,30 +615,44 @@ class MainWindow(ctk.CTkFrame):
             var.set(path)
             self._persist_dir(var)
 
+    def _active_dir_var(self):
+        page = getattr(self, "_active_page", None)
+        if page is None and hasattr(self, "_tabview"):
+            try:
+                page = self._tabview.get()
+            except Exception:
+                page = None
+        if page == _PLAYLIST_TAB:
+            primary = getattr(self, "_playlist_dir_var", None)
+            secondary = getattr(self, "_dir_var", None)
+        else:
+            primary = getattr(self, "_dir_var", None)
+            secondary = getattr(self, "_playlist_dir_var", None)
+
+        if primary is not None and primary.get().strip():
+            return primary
+        if secondary is not None and secondary.get().strip():
+            return secondary
+        return primary or secondary
+
     def _on_close(self):
-        saved = self.config.get("download.default_dir", "")
-        for var in (self._dir_var, self._playlist_dir_var):
-            current = var.get().strip()
-            if current and current != saved:
-                self.config.set("download.default_dir", current)
-                break
+        active_var = self._active_dir_var()
+        if active_var is not None:
+            self._persist_dir(active_var)
         # Kill any active yt-dlp/ffmpeg tree and drain the worker before the
         # window goes away, so closing mid-download leaves no orphans behind.
         self._controller.shutdown()
         self.master.destroy()
 
     def _open_settings(self):
-        saved = self.config.get("download.default_dir", "")
-        for var in (self._dir_var, self._playlist_dir_var):
-            current = var.get().strip()
-            if current and current != saved:
-                self.config.set("download.default_dir", current)
-                saved = current
+        active_var = self._active_dir_var()
+        if active_var is not None:
+            self._persist_dir(active_var)
         dialog = SettingsDialog(self.master, self.config)
         self.wait_window(dialog)
         saved_dir = self.config.get("download.default_dir", "")
-        for var in (self._dir_var, self._playlist_dir_var):
-            if saved_dir and var.get().strip() != saved_dir:
+        for var in (getattr(self, "_dir_var", None), getattr(self, "_playlist_dir_var", None)):
+            if var is not None and saved_dir and var.get().strip() != saved_dir:
                 var.set(saved_dir)
 
     # ------------------------------------------------------------------ #

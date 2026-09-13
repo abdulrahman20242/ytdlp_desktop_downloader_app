@@ -1010,3 +1010,82 @@ def test_on_close_saves_dir_and_destroys_master():
     assert mw.config.get("download.default_dir") == "C:\\new"
     assert mw._controller.shutdown_calls == 1
     assert master.destroyed
+
+
+def test_on_close_does_not_revert_persisted_dir_when_both_vars_exist():
+    class FakeMaster:
+        def destroy(self):
+            pass
+
+    mw = _wired_window()
+    mw.master = FakeMaster()
+    mw.config = _FakeConfig({"download": {"default_dir": "C:\\initial"}})
+    mw._dir_var.set("C:\\initial")
+    mw._playlist_dir_var.set("C:\\initial")
+
+    # User changes directory from video UI and it persists
+    mw._dir_var.set("C:\\new_folder")
+    mw._persist_dir(mw._dir_var)
+    assert mw.config.get("download.default_dir") == "C:\\new_folder"
+    assert mw._playlist_dir_var.get() == "C:\\new_folder"
+
+    # Closing with 'X' must keep the new folder and NOT revert to C:\initial
+    mw._on_close()
+    assert mw.config.get("download.default_dir") == "C:\\new_folder"
+
+
+def test_on_close_does_not_revert_persisted_playlist_dir():
+    class FakeMaster:
+        def destroy(self):
+            pass
+
+    mw = _wired_window()
+    mw.master = FakeMaster()
+    mw.config = _FakeConfig({"download": {"default_dir": "C:\\initial"}})
+    mw._dir_var.set("C:\\initial")
+    mw._playlist_dir_var.set("C:\\initial")
+    mw._active_page = _PLAYLIST_TAB
+
+    mw._playlist_dir_var.set("C:\\playlist_folder")
+    mw._persist_dir(mw._playlist_dir_var)
+    assert mw.config.get("download.default_dir") == "C:\\playlist_folder"
+    assert mw._dir_var.get() == "C:\\playlist_folder"
+
+    mw._on_close()
+    assert mw.config.get("download.default_dir") == "C:\\playlist_folder"
+
+
+def test_on_close_persists_uncommitted_typed_dir_on_active_tab():
+    class FakeMaster:
+        def destroy(self):
+            pass
+
+    mw = _wired_window()
+    mw.master = FakeMaster()
+    mw.config = _FakeConfig({"download": {"default_dir": "C:\\initial"}})
+    mw._dir_var.set("C:\\typed_folder")
+    mw._playlist_dir_var.set("C:\\initial")
+    mw._active_page = _VIDEO_TAB
+
+    mw._on_close()
+    assert mw.config.get("download.default_dir") == "C:\\typed_folder"
+
+
+def test_tab_changed_syncs_uncommitted_dir():
+    class FakeTabview:
+        def __init__(self, active):
+            self._active = active
+
+        def get(self):
+            return self._active
+
+    mw = _wired_window()
+    mw.config = _FakeConfig({"download": {"default_dir": "C:\\initial"}})
+    mw._tabview = FakeTabview(_PLAYLIST_TAB)
+    mw._active_page = _VIDEO_TAB
+    mw._dir_var.set("C:\\typed_video")
+    mw._playlist_dir_var.set("C:\\initial")
+
+    mw._on_tab_changed()
+    assert mw._playlist_dir_var.get() == "C:\\typed_video"
+    assert mw.config.get("download.default_dir") == "C:\\typed_video"

@@ -68,6 +68,12 @@ function Safe-RemoveDirectory {
             Remove-Item $Path -Recurse -Force -ErrorAction Stop
             return
         } catch {
+            try {
+                Get-ChildItem -LiteralPath $Path -Force | Remove-Item -Recurse -Force -ErrorAction Stop
+                return
+            } catch {
+                # Fall through to retry
+            }
             if ($i -eq 3) {
                 throw "Could not clean directory '$Path' (file is locked or in use by another process).`nError: $($_.Exception.Message)"
             }
