@@ -1,4 +1,5 @@
 import pytest
+from yt_dlp.utils import DownloadError
 
 from core import info_extractor
 from core.info_extractor import (
@@ -44,9 +45,16 @@ def test_extract_info_returns_sanitized_info_on_success(monkeypatch):
 
 
 def test_extract_info_returns_none_on_extractor_failure(monkeypatch):
-    fake = _FakeYDL(fail=RuntimeError("network down"))
+    fake = _FakeYDL(fail=DownloadError("network down"))
     monkeypatch.setattr(info_extractor, "YoutubeDL", lambda opts: fake)
     assert extract_info("https://youtu.be/x") is None
+
+
+def test_extract_info_propagates_unexpected_exceptions(monkeypatch):
+    fake = _FakeYDL(fail=TypeError("unexpected error"))
+    monkeypatch.setattr(info_extractor, "YoutubeDL", lambda opts: fake)
+    with pytest.raises(TypeError):
+        extract_info("https://youtu.be/x")
 
 
 @pytest.mark.parametrize(
@@ -236,9 +244,19 @@ def test_extract_playlist_returns_none_on_failure(monkeypatch):
     monkeypatch.setattr(
         info_extractor,
         "YoutubeDL",
-        lambda opts: _RecordingYDL(fail=RuntimeError("boom")),
+        lambda opts: _RecordingYDL(fail=DownloadError("boom")),
     )
     assert extract_playlist("https://www.youtube.com/playlist?list=PL1") is None
+
+
+def test_extract_playlist_propagates_unexpected_exceptions(monkeypatch):
+    monkeypatch.setattr(
+        info_extractor,
+        "YoutubeDL",
+        lambda opts: _RecordingYDL(fail=KeyError("unexpected")),
+    )
+    with pytest.raises(KeyError):
+        extract_playlist("https://www.youtube.com/playlist?list=PL1")
 
 
 def test_extract_playlist_handles_empty_entries(monkeypatch):

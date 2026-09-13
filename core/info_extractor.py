@@ -1,6 +1,11 @@
+import logging
+
 from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadError
 
 from utils.paths import bin_dir
+
+LOGGER = logging.getLogger(__name__)
 
 BIN_DIR = bin_dir()
 
@@ -17,7 +22,8 @@ def extract_info(url: str) -> dict | None:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return ydl.sanitize_info(info)
-    except Exception:
+    except DownloadError as exc:
+        LOGGER.warning("Could not extract info for %s: %s", url, exc)
         return None
 
 
@@ -94,7 +100,8 @@ def extract_playlist(url: str) -> dict | None:
     try:
         with YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=False)
-    except Exception:
+    except DownloadError as exc:
+        LOGGER.warning("Could not extract playlist for %s: %s", url, exc)
         return None
 
     entries = info.get("entries") or []

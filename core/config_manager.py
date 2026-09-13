@@ -184,15 +184,15 @@ class ConfigManager:
         return merged_settings
     def get(self, key_path: str, default=None):
         keys = key_path.split(".")
-        obj = self._data
-        for k in keys:
-            if isinstance(obj, dict):
-                obj = obj.get(k)
-                if obj is None:
+        current_node = self._data
+        for key in keys:
+            if isinstance(current_node, dict):
+                current_node = current_node.get(key)
+                if current_node is None:
                     return default
             else:
                 return default
-        return obj
+        return current_node
 
     def set(self, key_path: str, value) -> bool:
         keys = key_path.split(".")

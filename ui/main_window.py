@@ -1,12 +1,16 @@
-import customtkinter as ctk
-import tkinter as tk
-import tkinter.messagebox as messagebox
+import logging
 import threading
-from pathlib import Path
-import tkinter.filedialog as fd
-from PIL import Image
 from io import BytesIO
+from pathlib import Path
+import tkinter as tk
+import tkinter.filedialog as fd
+import tkinter.messagebox as messagebox
+
+import customtkinter as ctk
 import requests
+from PIL import Image
+
+LOGGER = logging.getLogger(__name__)
 
 from ui.progress_widget import ProgressWidget
 from ui.logs_panel import LogsPanel
@@ -36,6 +40,16 @@ _PLAYLIST_TAB = "Playlist"
 # Which page currently owns the shared download controller.
 _RUN_VIDEO = "video"
 _RUN_PLAYLIST = "playlist"
+
+# Rows inside the video page's content frame:
+_VIDEO_URL_ROW = 0
+_VIDEO_INFO_ROW = 1
+_VIDEO_QUALITY_ROW = 2
+_VIDEO_DIR_ROW = 3
+_VIDEO_ACTION_ROW = 4
+_VIDEO_PROGRESS_ROW = 5
+_VIDEO_SEPARATOR_ROW = 6
+_VIDEO_LOGS_ROW = 7
 
 # Rows inside the playlist page's content frame that carry flexible weight:
 # the PlaylistPanel (row 2) and the LogsPanel (row 8).
@@ -115,7 +129,7 @@ class MainWindow(ctk.CTkFrame):
 
         self._video_tab = self._tabview.add(_VIDEO_TAB)
         self._video_tab.grid_columnconfigure(0, weight=1)
-        self._video_tab.grid_rowconfigure(7, weight=1)
+        self._video_tab.grid_rowconfigure(_VIDEO_LOGS_ROW, weight=1)
 
         self._playlist_tab = self._tabview.add(_PLAYLIST_TAB)
         self._playlist_tab.grid_columnconfigure(0, weight=1)
@@ -140,7 +154,7 @@ class MainWindow(ctk.CTkFrame):
 
     def _build_video_page(self, page):
         url_frame = ctk.CTkFrame(page, fg_color="transparent")
-        url_frame.grid(row=0, column=0, sticky="ew", pady=(1, 0))
+        url_frame.grid(row=_VIDEO_URL_ROW, column=0, sticky="ew", pady=(1, 0))
         url_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(url_frame, text="رابط YouTube:").grid(row=0, column=0, padx=(5, 5))
@@ -156,7 +170,7 @@ class MainWindow(ctk.CTkFrame):
         self._fetch_btn.grid(row=0, column=2)
 
         info_frame = ctk.CTkFrame(page, fg_color="transparent")
-        info_frame.grid(row=1, column=0, sticky="ew", pady=5)
+        info_frame.grid(row=_VIDEO_INFO_ROW, column=0, sticky="ew", pady=5)
         info_frame.grid_columnconfigure(1, weight=1)
         self._info_frame = info_frame
 
@@ -169,10 +183,10 @@ class MainWindow(ctk.CTkFrame):
         self._info_label.grid(row=1, column=1, sticky="nw", padx=5, pady=5)
 
         self._quality_selector = QualitySelector(page)
-        self._quality_selector.grid(row=2, column=0, sticky="ew", pady=1)
+        self._quality_selector.grid(row=_VIDEO_QUALITY_ROW, column=0, sticky="ew", pady=1)
 
         dir_frame = ctk.CTkFrame(page, fg_color="transparent")
-        dir_frame.grid(row=3, column=0, sticky="ew", pady=1)
+        dir_frame.grid(row=_VIDEO_DIR_ROW, column=0, sticky="ew", pady=1)
         dir_frame.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(dir_frame, text="مجلد الحفظ:").grid(row=0, column=0, padx=(5, 5))
@@ -185,7 +199,7 @@ class MainWindow(ctk.CTkFrame):
         ).grid(row=0, column=2)
 
         action_frame = ctk.CTkFrame(page, fg_color="transparent")
-        action_frame.grid(row=4, column=0, sticky="ew", pady=2)
+        action_frame.grid(row=_VIDEO_ACTION_ROW, column=0, sticky="ew", pady=2)
 
         self._download_btn = ctk.CTkButton(
             action_frame, text="⬇ تحميل", command=self._start_download,
@@ -212,12 +226,12 @@ class MainWindow(ctk.CTkFrame):
         self._settings_btn.pack(side="right", padx=5)
 
         self._video_progress = ProgressWidget(page)
-        self._video_progress.grid(row=5, column=0, sticky="ew", pady=1)
+        self._video_progress.grid(row=_VIDEO_PROGRESS_ROW, column=0, sticky="ew", pady=1)
 
-        tk.Frame(page, height=1, bg="#555").grid(row=6, column=0, sticky="ew", pady=0)
+        tk.Frame(page, height=1, bg="#555").grid(row=_VIDEO_SEPARATOR_ROW, column=0, sticky="ew", pady=0)
 
         self._video_logs = LogsPanel(page)
-        self._video_logs.grid(row=7, column=0, sticky="nsew", pady=4)
+        self._video_logs.grid(row=_VIDEO_LOGS_ROW, column=0, sticky="nsew", pady=4)
 
     def _build_playlist_page(self, page):
         pl_url_frame = ctk.CTkFrame(page, fg_color="transparent")
@@ -396,9 +410,7 @@ class MainWindow(ctk.CTkFrame):
             self._playlist_progress.set_message(
                 f"اكتملت القائمة ✓ — نجح {s['completed']} / فشل {s['failed']} (من {total})"
             )
-            self._playlist_panel.finish_download(
-                s["completed"], s["failed"], total,
-            )
+            self._playlist_panel.finish_download()
             self._restore_playlist_ui()
             self._playlist_run = {"completed": 0, "failed": 0, "total": 0}
             self._active_run = None
@@ -540,18 +552,26 @@ class MainWindow(ctk.CTkFrame):
         self._playlist_download_btn.configure(state="normal")
 
     def _load_thumbnail(self, url: str):
-        def load():
+        def _fetch():
             try:
                 resp = requests.get(url, timeout=10)
+                resp.raise_for_status()
                 img = Image.open(BytesIO(resp.content))
                 img = img.resize((160, 90), Image.LANCZOS)
                 photo = ctk.CTkImage(img, size=(160, 90))
-                self.after(0, lambda: self._thumb_label.configure(image=photo, text=""))
-                self.after(0, lambda: setattr(self, "_thumb_photo", photo))
-            except Exception:
-                pass
 
-        threading.Thread(target=load, daemon=True).start()
+                def _apply():
+                    try:
+                        self._thumb_label.configure(image=photo, text="")
+                        self._thumb_photo = photo
+                    except (tk.TclError, AttributeError, RuntimeError):
+                        pass
+
+                self.after(0, _apply)
+            except (requests.RequestException, OSError) as exc:
+                LOGGER.debug("Could not load thumbnail %s: %s", url, exc)
+
+        threading.Thread(target=_fetch, daemon=True).start()
 
     # ------------------------------------------------------------------ #
     #  Directories / settings
@@ -760,7 +780,7 @@ class MainWindow(ctk.CTkFrame):
         if run == _RUN_PLAYLIST:
             self._playlist_logs.append_log("[INFO] تم إلغاء التحميل")
             self._playlist_progress.reset()
-            self._playlist_panel.finish_download(0, 0, 0)
+            self._playlist_panel.finish_download()
             self._playlist_run = {"completed": 0, "failed": 0, "total": 0}
             self._restore_playlist_ui()
         else:

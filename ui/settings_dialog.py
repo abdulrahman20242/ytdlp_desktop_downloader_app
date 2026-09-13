@@ -71,7 +71,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self._mode_menu.grid(row=1, column=1, sticky="ew", pady=5, padx=(5, 0))
 
         self._fragments_var = ctk.StringVar()
-        ctk.CTkLabel(self._download_tab, text="تحميل متوازي (fragments):").grid(row=1, column=0, sticky="w", pady=5)
+        ctk.CTkLabel(self._download_tab, text="تحميل متوازي (fragments):").grid(row=2, column=0, sticky="w", pady=5)
         self._fragments_spin = ctk.CTkEntry(self._download_tab, textvariable=self._fragments_var, width=60)
         self._fragments_spin.grid(row=2, column=1, sticky="w", pady=5, padx=(5, 0))
 
@@ -123,7 +123,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self._mode_var.set(self.config.get("download.default_mode", "video"))
         self._fragments_var.set(str(self.config.get("download.concurrent_fragments", 4)))
         self._retries_var.set(str(self.config.get("download.retries", 10)))
-        self._cookies_source_var.set(self.config.get("cookies.source", "browser"))
+        self._cookies_source_var.set(self.config.get("cookies.source", "none"))
         self._browser_var.set(self.config.get("cookies.browser", "chrome"))
         self._debug_var.set(self.config.get("advanced.show_debug_logs", False))
         self._sponsorblock_var.set(self.config.get("advanced.sponsorblock_remove", False))

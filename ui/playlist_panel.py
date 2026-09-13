@@ -1,10 +1,13 @@
-import customtkinter as ctk
+import logging
 import threading
 import tkinter as tk
 import tkinter.font as tkfont
 from io import BytesIO
 
+import customtkinter as ctk
 from customtkinter import ScalingTracker
+
+LOGGER = logging.getLogger(__name__)
 
 import requests
 from PIL import Image
@@ -138,7 +141,7 @@ class PlaylistPanel(ctk.CTkFrame):
         """
         try:
             return max(1, round(px / ScalingTracker.get_widget_scaling(self)))
-        except Exception:
+        except (tk.TclError, RuntimeError):
             return px
 
     def _build_header(self):
@@ -345,7 +348,7 @@ class PlaylistPanel(ctk.CTkFrame):
                 self._set_status(row, "")
         self._disable_controls()
 
-    def finish_download(self, completed: int, failed: int, total: int):
+    def finish_download(self):
         """Re-enable selection controls after a playlist run."""
         self._enable_controls()
 
@@ -505,6 +508,7 @@ class PlaylistPanel(ctk.CTkFrame):
         def _fetch():
             try:
                 resp = requests.get(url, timeout=10)
+                resp.raise_for_status()
                 img = Image.open(BytesIO(resp.content))
                 img = img.resize(size, Image.LANCZOS)
                 photo = ctk.CTkImage(img, size=size)
@@ -512,12 +516,12 @@ class PlaylistPanel(ctk.CTkFrame):
                 def _apply():
                     try:
                         label.configure(image=photo, text="")
-                    except Exception:
+                    except (tk.TclError, AttributeError, RuntimeError):
                         pass  # frame was rebuilt/closed before the image arrived
 
                 self.after(0, _apply)
-            except Exception:
-                pass  # keep the placeholder on failure
+            except (requests.RequestException, OSError) as exc:
+                LOGGER.debug("Could not load playlist thumbnail %s: %s", url, exc)
 
         threading.Thread(target=_fetch, daemon=True).start()
 
@@ -599,7 +603,7 @@ class PlaylistPanel(ctk.CTkFrame):
         if self._measure_font_cache is None:
             try:
                 self._measure_font_cache = tkfont.Font(font=self._TITLE_FONT)
-            except Exception:
+            except (tk.TclError, RuntimeError):
                 self._measure_font_cache = False
         return self._measure_font_cache or None
 
@@ -607,7 +611,7 @@ class PlaylistPanel(ctk.CTkFrame):
         if self._measure_bold_font_cache is None:
             try:
                 self._measure_bold_font_cache = tkfont.Font(font=("", 14, "bold"))
-            except Exception:
+            except (tk.TclError, RuntimeError):
                 self._measure_bold_font_cache = False
         return self._measure_bold_font_cache or None
 
@@ -615,14 +619,14 @@ class PlaylistPanel(ctk.CTkFrame):
         if self._truncate_after is not None:
             try:
                 self.after_cancel(self._truncate_after)
-            except Exception:
+            except (tk.TclError, ValueError, AttributeError):
                 pass
         self._truncate_after = self.after(50, self._refresh_row_truncation)
 
     def _refresh_row_truncation(self):
         try:
             width = self._list.winfo_width()
-        except Exception:
+        except (tk.TclError, AttributeError):
             return
         if width <= 40:
             return

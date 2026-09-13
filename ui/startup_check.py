@@ -9,7 +9,6 @@ class StartupCheckFrame(ctk.CTkFrame):
         super().__init__(master)
         self.master = master
         self._on_done = on_done
-        self._result = False
 
         self.grid(sticky="nsew")
         self.grid_columnconfigure(0, weight=1)

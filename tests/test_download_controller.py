@@ -346,14 +346,21 @@ def test_build_argv_audio_postprocessors_and_merge():
 
 
 def test_build_argv_js_runtimes_point_at_node_in_ffmpeg_bin(tmp_path):
+    node_path = str(Path(tmp_path) / "node.exe")
     opts = {
         "format": "best",
         "ffmpeg_location": str(tmp_path),
-        "js_runtimes": {"node": {"path": "ignored"}},
+        "js_runtimes": {"node": {"path": node_path}},
     }
     argv = _build_argv(opts, "u", Path("."))
-    assert argv[argv.index("--js-runtimes") + 1] == f"node:{Path(tmp_path) / 'node.exe'}"
+    assert argv[argv.index("--js-runtimes") + 1] == f"node:{node_path}"
     assert argv[argv.index("--ffmpeg-location") + 1] == str(tmp_path)
+
+
+def test_build_argv_js_runtimes_without_path():
+    opts = {"format": "best", "js_runtimes": {"deno": {}}}
+    argv = _build_argv(opts, "u", Path("."))
+    assert argv[argv.index("--js-runtimes") + 1] == "deno"
 
 
 def test_build_argv_sponsorblock_default_categories():
@@ -850,3 +857,31 @@ def test_terminate_tree_bounded_wait_timeout(monkeypatch):
     # If wait times out, cleanup could not be confirmed -> returns False
     assert _terminate_tree(proc) is False
     assert proc.terminated is True
+
+
+def test_run_single_does_not_terminate_running_proc_on_success(monkeypatch):
+    """When stdout hits EOF but the process is still alive and not cancelled,
+    _run_single must wait for normal exit without killing the process."""
+    class _StillAliveAtEofProc(_FakeProc):
+        def __init__(self):
+            super().__init__(["[download] 100% of 1.00MiB in 00:01\n"], rc=0)
+            self.terminate_called = False
+            self.poll_calls = 0
+
+        def poll(self):
+            self.poll_calls += 1
+            if self.poll_calls <= 2:
+                return None
+            return 0
+
+        def terminate(self):
+            self.terminate_called = True
+
+    proc = _StillAliveAtEofProc()
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: proc)
+
+    controller = _bare_controller()
+    result = controller._run_single("https://youtu.be/x", {"format": "best"}, Path("."))
+
+    assert result == "ok"
+    assert proc.terminate_called is False

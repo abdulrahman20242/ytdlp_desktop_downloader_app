@@ -14,3 +14,16 @@ def config(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cm, "CONFIG_PATH", tmp_path / "config.json")
     return cm.ConfigManager()
+
+
+@pytest.fixture(scope="session")
+def tk_root():
+    import customtkinter as ctk
+
+    root = ctk.CTk()
+    root.withdraw()
+    yield root
+    try:
+        root.destroy()
+    except Exception:
+        pass

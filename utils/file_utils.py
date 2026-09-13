@@ -32,13 +32,6 @@ def get_downloads_dir() -> Path:
     return Path.home() / "Downloads" / "YTDownloader"
 
 
-def safe_filename(name: str) -> str:
-    invalid_chars = '<>:"/\\|?*'
-    for c in invalid_chars:
-        name = name.replace(c, "_")
-    return name.strip()
-
-
 _RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
     *{f"COM{i}" for i in range(1, 10)},

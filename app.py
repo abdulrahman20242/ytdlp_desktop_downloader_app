@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import logging
 import os
 import sys
+import tkinter as tk
 
 # Resolve application paths from the executable location *before* importing
 # anything else. In the frozen onedir build the resources live beside
@@ -21,6 +23,7 @@ from core.config_manager import ConfigManager  # noqa: E402
 from ui.main_window import MainWindow  # noqa: E402
 from ui.startup_check import StartupCheckFrame  # noqa: E402
 
+LOGGER = logging.getLogger(__name__)
 
 __version__ = "1.0.0"
 
@@ -38,9 +41,9 @@ def main():
 
     root = ctk.CTk()
     root.title(f"YT Downloader v{__version__}")
-    w = config.get("ui.window_width", 800)
-    h = config.get("ui.window_height", 600)
-    root.geometry(f"{w}x{h}")
+    window_width = config.get("ui.window_width", 800)
+    window_height = config.get("ui.window_height", 600)
+    root.geometry(f"{window_width}x{window_height}")
     root.minsize(700, 500)
     root.grid_columnconfigure(0, weight=1)
     root.grid_rowconfigure(0, weight=1)
@@ -49,8 +52,8 @@ def main():
         logo = next(assets_dir().glob("*.ico"), None)
         if logo:
             root.iconbitmap(str(logo))
-    except Exception:
-        pass
+    except (OSError, tk.TclError) as exc:
+        LOGGER.debug("Could not set window icon: %s", exc)
 
     def on_startup_done():
         MainWindow(root, config)

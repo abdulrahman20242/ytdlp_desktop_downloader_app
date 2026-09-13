@@ -43,11 +43,11 @@ class DependencyChecker:
         satisfy."""
         exe_ver = None
         py_ver = None
-        for r in results:
-            if r.name == "yt-dlp" and r.found and r.version:
-                exe_ver = r.version.strip()
-            elif r.name == "yt-dlp Python package" and r.found and r.version:
-                py_ver = r.version.strip()
+        for dep_result in results:
+            if dep_result.name == "yt-dlp" and dep_result.found and dep_result.version:
+                exe_ver = dep_result.version.strip()
+            elif dep_result.name == "yt-dlp Python package" and dep_result.found and dep_result.version:
+                py_ver = dep_result.version.strip()
 
         if exe_ver and py_ver and exe_ver != py_ver:
             return DepResult(
@@ -72,7 +72,7 @@ class DependencyChecker:
                     creationflags=_CREATE_NO_WINDOW,
                 )
                 version = out.split("\n")[0] if out else "unknown"
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 version = "unknown"
             return DepResult("FFmpeg", True, str(path), version, required=True)
         return DepResult("FFmpeg", False, None, None, required=True)
@@ -90,7 +90,7 @@ class DependencyChecker:
                     creationflags=_CREATE_NO_WINDOW,
                 )
                 version = out.split("\n")[0] if out else "unknown"
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 version = "unknown"
             return DepResult("FFprobe", True, str(path), version, required=True)
         return DepResult("FFprobe", False, None, None, required=True)
@@ -106,7 +106,7 @@ class DependencyChecker:
                     text=True,
                     creationflags=_CREATE_NO_WINDOW,
                 ).strip()
-            except Exception:
+            except (OSError, subprocess.SubprocessError):
                 ver = "unknown"
             return DepResult("Node.js", True, str(path), ver, required=False)
         return DepResult("Node.js", False, None, None, required=False)

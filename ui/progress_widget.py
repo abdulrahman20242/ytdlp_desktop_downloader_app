@@ -1,3 +1,5 @@
+import os
+
 import customtkinter as ctk
 
 
@@ -45,7 +47,6 @@ class ProgressWidget(ctk.CTkFrame):
 
             filename = d.get("filename", "")
             if filename:
-                import os
                 self._filename_label.configure(text=os.path.basename(filename))
 
         elif status == "finished":

@@ -145,24 +145,14 @@ def _terminate_tree(proc) -> bool:
             LOGGER.warning("taskkill could not terminate process %s: %s", pid, exc)
     return _terminate_directly(proc)
 
-def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
-    base_bin = bin_dir()
-    ffmpeg = opts.get("ffmpeg_location")
-    ffmpeg_dir = Path(ffmpeg) if ffmpeg else base_bin
-
-    args = []
-
-    fmt = opts.get("format")
-    if fmt:
-        args += ["-f", fmt]
-
+def _append_postprocessor_args(args: list[str], opts: dict) -> None:
     for pp in opts.get("postprocessors", []) or []:
         key = pp.get("key")
         if key == "FFmpegExtractAudio":
             args += ["-x", "--audio-format", pp.get("preferredcodec", "mp3")]
-            q = pp.get("preferredquality")
-            if q:
-                args += ["--audio-quality", str(q)]
+            quality_pref = pp.get("preferredquality")
+            if quality_pref:
+                args += ["--audio-quality", str(quality_pref)]
         elif key == "FFmpegMetadata":
             args += ["--add-metadata"]
         elif key == "EmbedThumbnail":
@@ -174,35 +164,40 @@ def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
     if opts.get("merge_output_format"):
         args += ["--merge-output-format", str(opts["merge_output_format"])]
 
+
+def _append_network_and_filter_args(args: list[str], opts: dict) -> None:
     if opts.get("noplaylist"):
         args += ["--no-playlist"]
 
-    if ffmpeg:
-        args += ["--ffmpeg-location", str(ffmpeg_dir)]
-
-    n = opts.get("concurrent_fragments")
-    if n is not None:
-        args += ["--concurrent-fragments", str(n)]
+    fragments_count = opts.get("concurrent_fragments")
+    if fragments_count is not None:
+        args += ["--concurrent-fragments", str(fragments_count)]
 
     for key, flag in (("retries", "--retries"), ("fragment_retries", "--fragment-retries")):
-        v = opts.get(key)
-        if v is not None:
-            args += [flag, str(v)]
+        val = opts.get(key)
+        if val is not None:
+            args += [flag, str(val)]
 
     if opts.get("throttledratelimit"):
         args += ["--throttled-rate", str(opts["throttledratelimit"])]
 
-    fs = opts.get("format_sort")
-    if fs:
-        args += ["--format-sort", ",".join(fs) if isinstance(fs, (list, tuple)) else str(fs)]
+    format_sort_val = opts.get("format_sort")
+    if format_sort_val:
+        args += ["--format-sort", ",".join(format_sort_val) if isinstance(format_sort_val, (list, tuple)) else str(format_sort_val)]
 
-    js = opts.get("js_runtimes")
-    if isinstance(js, dict) and js:
+    if opts.get("sponsorblock_remove"):
+        remove = opts.get("sponsorblock_remove")
+        cats = remove if isinstance(remove, (list, tuple)) else opts.get("sponsorblock_categories")
+        cats = cats or ["sponsor"]
+        args += ["--sponsorblock-remove", ",".join(cats)]
+
+
+def _append_runtime_and_extractor_args(args: list[str], opts: dict) -> None:
+    js_runtimes = opts.get("js_runtimes")
+    if isinstance(js_runtimes, dict) and js_runtimes:
         runtimes = []
-        for name, cfg in js.items():
-            if name == "node":
-                runtimes.append(f"node:{ffmpeg_dir / 'node.exe'}")
-            elif isinstance(cfg, dict) and cfg.get("path"):
+        for name, cfg in js_runtimes.items():
+            if isinstance(cfg, dict) and cfg.get("path"):
                 runtimes.append(f"{name}:{cfg['path']}")
             else:
                 runtimes.append(name)
@@ -216,12 +211,10 @@ def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
             if not cfg:
                 continue
             if isinstance(cfg, dict):
-                kv_parts = []
-                for k, v in cfg.items():
-                    if isinstance(v, (list, tuple)):
-                        kv_parts.append(f"{k}={','.join(str(x) for x in v)}")
-                    else:
-                        kv_parts.append(f"{k}={v}")
+                kv_parts = [
+                    f"{k}={','.join(str(x) for x in v)}" if isinstance(v, (list, tuple)) else f"{k}={v}"
+                    for k, v in cfg.items()
+                ]
                 entries.append(f"{ie}:{';'.join(kv_parts)}")
             else:
                 entries.append(f"{ie}:{cfg}")
@@ -236,13 +229,25 @@ def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
     if cookie_file:
         args += ["--cookies", str(cookie_file)]
 
-    if opts.get("sponsorblock_remove"):
-        remove = opts.get("sponsorblock_remove")
-        cats = opts.get("sponsorblock_categories")
-        if isinstance(remove, (list, tuple)):
-            cats = remove
-        cats = cats or ["sponsor"]
-        args += ["--sponsorblock-remove", ",".join(cats)]
+
+def _build_argv(opts: dict, url: str, save_dir: Path) -> list[str]:
+    base_bin = bin_dir()
+    ffmpeg = opts.get("ffmpeg_location")
+    ffmpeg_dir = Path(ffmpeg) if ffmpeg else base_bin
+
+    args = []
+
+    fmt = opts.get("format")
+    if fmt:
+        args += ["-f", fmt]
+
+    _append_postprocessor_args(args, opts)
+
+    if ffmpeg:
+        args += ["--ffmpeg-location", str(ffmpeg_dir)]
+
+    _append_network_and_filter_args(args, opts)
+    _append_runtime_and_extractor_args(args, opts)
 
     outtmpl = opts.get("outtmpl") or str(Path(save_dir) / "%(title)s [%(id)s].%(ext)s")
     args += ["-o", outtmpl]
@@ -325,8 +330,8 @@ class DownloadController:
                 errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
-        except Exception as e:
-            return f"unknown:{e}"
+        except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+            return f"unknown:{exc}"
         self._proc = proc
 
         first_error = None
@@ -360,7 +365,8 @@ class DownloadController:
                     self._queue.put(("log", f"[INFO] {line}"))
         finally:
             self._proc = None
-            _terminate_tree(proc)
+            if self._stop_event.is_set():
+                _terminate_tree(proc)
 
         if self._stop_event.is_set():
             return "cancelled"
@@ -478,7 +484,7 @@ class DownloadController:
         if self._after_id and self._app:
             try:
                 self._app.after_cancel(self._after_id)
-            except Exception:
+            except (AttributeError, ValueError, RuntimeError):
                 pass
 
     def shutdown(self):
@@ -495,7 +501,7 @@ class DownloadController:
         if self._after_id and self._app:
             try:
                 self._app.after_cancel(self._after_id)
-            except Exception:
+            except (AttributeError, ValueError, RuntimeError):
                 pass
         self._proc = None
 

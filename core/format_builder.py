@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 QUALITY_OPTIONS = [
     "Best",
     "2160p",
@@ -86,19 +89,16 @@ def _audio_postprocessors(fmt: str) -> list[dict]:
     return pps
 
 
-def get_common_opts(bin_dir: str, config) -> dict:
-    import os
-    from pathlib import Path
-
-    bin_path = str(Path(bin_dir).resolve())
+def get_common_opts(bin_path: str, config) -> dict:
+    resolved_bin_path = str(Path(bin_path).resolve())
 
     # أضف bin/ للـ PATH حتى يلاقي yt-dlp كلاً من node.exe وffmpeg.exe
     current_path = os.environ.get("PATH", "")
-    if bin_path not in current_path:
-        os.environ["PATH"] = bin_path + os.pathsep + current_path
+    if resolved_bin_path not in current_path:
+        os.environ["PATH"] = resolved_bin_path + os.pathsep + current_path
 
     opts = {
-        "ffmpeg_location": bin_path,
+        "ffmpeg_location": resolved_bin_path,
         "concurrent_fragments": config.get("download.concurrent_fragments", 4),
         "retries": config.get("download.retries", 10),
         "fragment_retries": config.get("download.retries", 10),
@@ -110,7 +110,7 @@ def get_common_opts(bin_dir: str, config) -> dict:
         "verbose": bool(config.get("advanced.show_debug_logs", False)),
         # ضمان: أي رابط فيديو إن مرّت عليه list= لن يسحب القائمة كلها
         "noplaylist": True,
-        "js_runtimes": {"node": {}},
+        "js_runtimes": {"node": {"path": str(Path(resolved_bin_path) / "node.exe")}},
     }
 
     # تفعيل yt-dlp-ejs لحل JavaScript challenges في YouTube

@@ -1,3 +1,5 @@
+import pytest
+
 from ui.quality_selector import resolve_initial_selection
 from ui.settings_dialog import SettingsDialog
 from ui.main_window import MainWindow
@@ -45,26 +47,21 @@ class _FakeConfig:
 # --------------------------------------------------------------------- #
 
 
-def test_resolve_selection_video_mode_uses_default_quality():
-    assert resolve_initial_selection("video", "720p") == ("video", "720p")
-
-
-def test_resolve_selection_video_mode_falls_back_when_quality_unknown():
-    assert resolve_initial_selection("video", "9999p") == ("video", "1080p")
-
-
-def test_resolve_selection_mp4_only_uses_default_quality():
-    assert resolve_initial_selection("mp4_only", "Best") == ("mp4_only", "Best")
-
-
-def test_resolve_selection_audio_mode_defaults_to_mp3_without_audio_setting():
-    # لا إعداد صوت منفصل؛ MP3/M4A محصور في أداة التحكم الرئيسية دائمًا.
-    assert resolve_initial_selection("audio", "1080p") == ("audio", "MP3")
-    assert resolve_initial_selection("audio", "Best") == ("audio", "MP3")
-
-
-def test_resolve_selection_invalid_mode_saved_as_video():
-    assert resolve_initial_selection("bogus", "360p") == ("video", "360p")
+@pytest.mark.parametrize(
+    ("saved_mode", "saved_quality", "expected_mode", "expected_quality"),
+    [
+        ("video", "720p", "video", "720p"),
+        ("video", "9999p", "video", "1080p"),
+        ("mp4_only", "Best", "mp4_only", "Best"),
+        ("audio", "1080p", "audio", "MP3"),
+        ("audio", "Best", "audio", "MP3"),
+        ("bogus", "360p", "video", "360p"),
+    ],
+)
+def test_resolve_initial_selection_maps_mode_and_quality(
+    saved_mode, saved_quality, expected_mode, expected_quality
+):
+    assert resolve_initial_selection(saved_mode, saved_quality) == (expected_mode, expected_quality)
 
 
 def test_main_window_load_config_state_applies_defaults_to_selector():
@@ -316,26 +313,22 @@ def test_display_info_defaults_to_best_when_no_qualities():
     assert mw._quality_selector.calls == [["Best"]]
 
 
-def test_parse_int_reads_valid_value():
-    var = _StringVarStub("6")
-    assert SettingsDialog._parse_int(var, 4, minimum=1, maximum=16) == 6
-    assert var.get() == "6"
-
-
-def test_parse_int_falls_back_on_garbage_and_sanitizes_var():
-    var = _StringVarStub("abc")
-    assert SettingsDialog._parse_int(var, 4, minimum=1, maximum=16) == 4
-    assert var.get() == "4"
-
-
-def test_parse_int_clamps_out_of_range_back_to_default():
-    var = _StringVarStub("999")
-    assert SettingsDialog._parse_int(var, 4, minimum=1, maximum=16) == 4
-    assert var.get() == "4"
-
-    below = _StringVarStub("-5")
-    assert SettingsDialog._parse_int(below, 10, minimum=0, maximum=100) == 10
-    assert below.get() == "10"
+@pytest.mark.parametrize(
+    ("raw_val", "default_val", "min_val", "max_val", "expected_return", "expected_var"),
+    [
+        ("6", 4, 1, 16, 6, "6"),
+        ("abc", 4, 1, 16, 4, "4"),
+        ("999", 4, 1, 16, 4, "4"),
+        ("-5", 10, 0, 100, 10, "10"),
+    ],
+)
+def test_parse_int_validates_and_clamps_value(
+    raw_val, default_val, min_val, max_val, expected_return, expected_var
+):
+    var = _StringVarStub(raw_val)
+    result = SettingsDialog._parse_int(var, default_val, minimum=min_val, maximum=max_val)
+    assert result == expected_return
+    assert var.get() == expected_var
 
 
 def test_settings_dialog_save_failure_shows_error_and_keeps_dialog_open(monkeypatch):
@@ -406,3 +399,88 @@ def test_settings_dialog_save_success_destroys_dialog(monkeypatch):
     assert len(shown_errors) == 0
     assert dialog.destroyed is True
     assert len(saved_keys) == 10
+
+
+# --------------------------------------------------------------------- #
+#  SettingsDialog construction (real widgets)
+# --------------------------------------------------------------------- #
+
+
+def test_settings_dialog_builds_full_ui_and_loads_config(tk_root):
+    config = _FakeConfig({
+        "ui": {"theme": "light"},
+        "download": {
+            "default_dir": "C:\\vids", "default_quality": "720p", "default_mode": "audio",
+            "concurrent_fragments": 6, "retries": 5,
+        },
+        "cookies": {"source": "file", "browser": "firefox"},
+        "advanced": {"show_debug_logs": True, "sponsorblock_remove": True},
+    })
+    dlg = SettingsDialog(tk_root, config)
+    try:
+        assert dlg._theme_var.get() == "light"
+        assert dlg._dir_var.get() == "C:\\vids"
+        assert dlg._quality_var.get() == "720p"
+        assert dlg._mode_var.get() == "audio"
+        assert dlg._fragments_var.get() == "6"
+        assert dlg._retries_var.get() == "5"
+        assert dlg._cookies_source_var.get() == "file"
+        assert dlg._browser_var.get() == "firefox"
+        assert dlg._debug_var.get() is True
+        assert dlg._sponsorblock_var.get() is True
+    finally:
+        dlg.destroy()
+
+
+def test_settings_dialog_uses_defaults_when_config_empty(tk_root):
+    dlg = SettingsDialog(tk_root, _FakeConfig({}))
+    try:
+        assert dlg._theme_var.get() == "dark"
+        assert dlg._quality_var.get() == "1080p"
+        assert dlg._mode_var.get() == "video"
+        assert dlg._fragments_var.get() == "4"
+        assert dlg._retries_var.get() == "10"
+        assert dlg._cookies_source_var.get() == "none"
+        assert dlg._browser_var.get() == "chrome"
+        assert dlg._debug_var.get() is False
+        assert dlg._sponsorblock_var.get() is False
+    finally:
+        dlg.destroy()
+
+
+class _MenuStateStub:
+    def __init__(self):
+        self.state = "normal"
+
+    def configure(self, state=None):
+        self.state = state
+
+
+def test_cookies_source_change_toggles_browser_menu():
+    dialog = object.__new__(SettingsDialog)
+    menu = _MenuStateStub()
+    dialog._browser_menu = menu
+    dialog._on_cookies_source_change("none")
+    assert menu.state == "disabled"
+    dialog._on_cookies_source_change("browser")
+    assert menu.state == "normal"
+
+
+def test_browse_dir_sets_var_when_directory_picked(monkeypatch):
+    import ui.settings_dialog as sd_module
+
+    monkeypatch.setattr(sd_module.fd, "askdirectory", lambda **kwargs: "C:\\picked")
+    dialog = object.__new__(SettingsDialog)
+    dialog._dir_var = _StringVarStub("C:\\old")
+    dialog._browse_dir()
+    assert dialog._dir_var.get() == "C:\\picked"
+
+
+def test_browse_dir_keeps_previous_dir_when_cancelled(monkeypatch):
+    import ui.settings_dialog as sd_module
+
+    monkeypatch.setattr(sd_module.fd, "askdirectory", lambda **kwargs: "")
+    dialog = object.__new__(SettingsDialog)
+    dialog._dir_var = _StringVarStub("C:\\old")
+    dialog._browse_dir()
+    assert dialog._dir_var.get() == "C:\\old"

@@ -206,3 +206,9 @@ def test_get_common_opts_wires_verbose_from_show_debug_logs(bin_dir):
     assert on["verbose"] is True
     assert off["verbose"] is False
     assert missing["verbose"] is False
+
+
+def test_get_common_opts_configures_node_js_runtime(bin_dir):
+    opts = get_common_opts(str(bin_dir), _FakeConfig({}))
+    expected_node = str(bin_dir.resolve() / "node.exe")
+    assert opts["js_runtimes"] == {"node": {"path": expected_node}}
