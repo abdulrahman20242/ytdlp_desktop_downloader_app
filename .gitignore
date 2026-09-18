@@ -1,6 +1,6 @@
 # Python & Virtual Environment
 
-**pycache**/
+__pycache__/
 venv/
 .venv/
 
@@ -24,7 +24,6 @@ graphify-out/
 .coverage
 .gemini/
 opencode.jsonc
-AGENTS.md
 GEMINI.md
 .pytest_temp/
 skills-lock.json
