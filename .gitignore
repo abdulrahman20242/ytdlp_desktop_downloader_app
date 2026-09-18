@@ -1,26 +1,36 @@
-# Python & Virtual Env
-__pycache__/
+# Python & Virtual Environment
+
+**pycache**/
 venv/
 .venv/
 
-# Build outputs
+# Build Outputs
+
 build/
 dist/
 Release/
 
 # Project Files
+
 bin/cookies.txt
 data/cookies.txt
 logs/
-.opencode
-.claude
-.agents
-.codex
-graphify-out
+.opencode/
+.claude/
+.agents/
+.codex/
+.codegraph
+graphify-out/
 .coverage
-.pytest_temp
+.gemini/
+opencode.jsonc
+AGENTS.md
+GEMINI.md
+.pytest_temp/
+skills-lock.json
+
 # Media
+
 *.mp4
 *.webm
 *.zip
-skills-lock.json
