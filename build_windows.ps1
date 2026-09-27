@@ -3,17 +3,21 @@
     Builds the portable "YT Downloader" release for Windows.
 
 .DESCRIPTION
-    Produces the final layout under Release\:
+    Freezes app.py straight into the release executable with PyInstaller -- there
+    is no outer launcher and no .NET step. The final layout under Release\ is:
 
-        Release\YT Downloader.exe              native outer launcher (.NET 4.8)
-        Release\YT Downloader\YTDownloaderCore.exe  PyInstaller onedir core
-        Release\YT Downloader\_internal\           Python payload
-        Release\YT Downloader\bin\                 yt-dlp, ffmpeg, ffprobe, node
-        Release\YT Downloader\assets\              icon + fonts
+        Release\YT Downloader.exe     PyInstaller onedir executable (app.py)
+        Release\_internal\            frozen Python run-time, libraries, base_library.zip
+        Release\bin\                  yt-dlp, ffmpeg, ffprobe, node
+        Release\assets\               icon + fonts
 
-    Pipeline: run tests -> generate icon -> publish launcher -> PyInstaller
-    core -> assemble resources next to the core exe -> validate the bundle
-    (selftest exit code + bundled binaries) -> summary.
+    bin\ and assets\ deliberately stay *beside* the executable instead of inside
+    _internal\, because utils.paths.app_root() resolves them from the executable's
+    own directory. That keeps the folder relocatable as a unit.
+
+    Pipeline: stop locked processes -> prerequisites -> tests -> icon ->
+    PyInstaller -> assemble Release\ -> validate layout -> packaged self-test
+    from an arbitrary CWD -> bundled binary smoke tests -> summary.
 
 .PARAMETER SkipTests
     Skips the pytest run.
@@ -33,18 +37,23 @@ Set-StrictMode -Version Latest
 $Root = $PSScriptRoot
 $IconScript = Join-Path $Root "build_assets\make_icon.py"
 $SpecFile   = Join-Path $Root "ytdownloader.spec"
-$LauncherProj = Join-Path $Root "build_assets\launcher\YTDownloader.Launcher.csproj"
-$LaunchOut  = Join-Path $Root "build_assets\build\launcher"
-$DistCore   = Join-Path $Root "dist\YTDownloaderCore"
 $DistDir    = Join-Path $Root "dist"
+$StageDir   = Join-Path $DistDir "YT Downloader"
+$WorkDir    = Join-Path $Root "build\pyinstaller"
 $Release    = Join-Path $Root "Release"
-$AppDir     = Join-Path $Release "YT Downloader"
+$AppExe     = Join-Path $Release "YT Downloader.exe"
+$IconFile   = Join-Path $Root "build_assets\build\logo.ico"
 $BinExes    = @("yt-dlp.exe", "ffmpeg.exe", "ffprobe.exe", "node.exe")
+
+# Directory names that must end up as siblings of the executable, not inside
+# _internal\ -- utils.paths resolves bin/ and assets/ from app_root().
+$ResourceDirs = @("bin", "assets")
+$Forbidden    = @("YT Downloader", "YTDownloaderCore.exe", "YT Downloader.exe.config")
 
 function Stop-LockedProcesses {
     param([string]$TargetDir)
     if (-not (Test-Path $TargetDir)) { return }
-    $procs = Get-Process "YT Downloader", "YTDownloaderCore", "yt-dlp", "ffmpeg", "ffprobe", "node" -ErrorAction SilentlyContinue
+    $procs = Get-Process "YT Downloader", "yt-dlp", "ffmpeg", "ffprobe", "node" -ErrorAction SilentlyContinue
     foreach ($proc in $procs) {
         try {
             $pPath = $proc.Path
@@ -84,16 +93,16 @@ function Safe-RemoveDirectory {
     }
 }
 
+function Assert-Exists {
+    param([string]$Path, [string]$Label)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Package validation failed: $Label is missing -> $Path"
+    }
+}
+
 function Check-Prerequisites {
     Write-Host "==> Checking build prerequisites..." -ForegroundColor Cyan
 
-    # 1. dotnet CLI
-    $dotnet = Get-Command "dotnet" -ErrorAction SilentlyContinue
-    if (-not $dotnet) {
-        throw "Prerequisite missing: .NET SDK ('dotnet' CLI) is required to build the launcher. Please install .NET SDK or Visual Studio Build Tools."
-    }
-
-    # 2. Python & packages
     $py = Get-Command "python" -ErrorAction SilentlyContinue
     if (-not $py) {
         throw "Prerequisite missing: Python is not available in PATH."
@@ -104,15 +113,13 @@ function Check-Prerequisites {
         throw "Prerequisite missing: Required Python packages (PyInstaller, pillow, customtkinter) are not installed in the active environment."
     }
 
-    # 3. Binaries under bin/
     foreach ($exe in $BinExes) {
         $p = Join-Path $Root "bin\$exe"
-        if (-not (Test-Path $p)) {
+        if (-not (Test-Path -LiteralPath $p)) {
             throw "Prerequisite missing: Bundled binary not found: $p`nPlease place yt-dlp.exe, ffmpeg.exe, ffprobe.exe, and node.exe in the bin/ directory before building."
         }
     }
 
-    Write-Host "  [ok] .NET SDK available"
     Write-Host "  [ok] Python & build packages available"
     Write-Host "  [ok] All required binaries found in bin\"
 }
@@ -127,10 +134,119 @@ function Invoke-Step {
     }
 }
 
+function Copy-FrozenBundle {
+    # PyInstaller writes dist\YT Downloader\{YT Downloader.exe,_internal\}.
+    # Flatten one level up so Release\ is the bundle root and no nested
+    # "YT Downloader" application directory survives the assembly.
+    Get-ChildItem -LiteralPath $StageDir -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $Release -Recurse -Force
+    }
+}
+
+function Copy-ApplicationResources {
+    # bin/ and assets/ stay beside the executable, never inside _internal.
+    $binTarget = Join-Path $Release "bin"
+    $assetsTarget = Join-Path $Release "assets"
+    New-Item -ItemType Directory -Force -Path $binTarget, $assetsTarget | Out-Null
+
+    foreach ($exe in $BinExes) {
+        Copy-Item -LiteralPath (Join-Path $Root "bin\$exe") -Destination (Join-Path $binTarget $exe) -Force
+    }
+
+    $fonts = Join-Path $Root "assets\fonts"
+    if (Test-Path -LiteralPath $fonts) {
+        Copy-Item -LiteralPath $fonts -Destination (Join-Path $assetsTarget "fonts") -Recurse -Force
+    }
+
+    Assert-Exists -Path $IconFile -Label "generated application icon"
+    Copy-Item -LiteralPath $IconFile -Destination (Join-Path $assetsTarget "logo.ico") -Force
+}
+
+function Assert-RequiredPackageFiles {
+    Assert-Exists -Path $AppExe -Label "application executable"
+    Assert-Exists -Path (Join-Path $Release "_internal") -Label "frozen Python runtime"
+    Assert-Exists -Path (Join-Path $Release "_internal\base_library.zip") -Label "frozen base_library.zip"
+    Assert-Exists -Path (Join-Path $Release "assets\logo.ico") -Label "application icon"
+
+    foreach ($exe in $BinExes) {
+        Assert-Exists -Path (Join-Path $Release "bin\$exe") -Label "bundled binary bin\$exe"
+    }
+}
+
+function Assert-ResourceDirsBesideExecutable {
+    # bin/, assets/ and _internal/ must be siblings of the executable: that is
+    # exactly what app_root() resolves when the frozen app starts.
+    $releaseRoot = (Resolve-Path -LiteralPath $Release).Path
+    foreach ($dir in ($ResourceDirs + "_internal")) {
+        $resolved = (Resolve-Path -LiteralPath (Join-Path $Release $dir)).Path
+        if ((Split-Path $resolved -Parent) -ne $releaseRoot) {
+            throw "Package validation failed: '$dir' is not a sibling of the executable -> $resolved"
+        }
+    }
+}
+
+function Assert-NoLauncherArtifacts {
+    foreach ($stale in $Forbidden) {
+        $stalePath = Join-Path $Release $stale
+        if (Test-Path -LiteralPath $stalePath) {
+            throw "Package validation failed: obsolete launcher artifact present -> $stalePath"
+        }
+    }
+
+    $topLevelExes = @(Get-ChildItem -LiteralPath $Release -Filter "*.exe" -File)
+    if ($topLevelExes.Count -ne 1 -or $topLevelExes[0].Name -ne "YT Downloader.exe") {
+        $found = ($topLevelExes | ForEach-Object { $_.Name }) -join ", "
+        throw "Package validation failed: Release\ must hold exactly one executable ('YT Downloader.exe'), found: $found"
+    }
+}
+
+function Invoke-PackagedSelfTest {
+    # The frozen app resolves bin/ and assets/ from its own directory, so run it
+    # from an unrelated CWD to prove nothing depends on the working directory.
+    $selftestDir = Join-Path ([System.IO.Path]::GetTempPath()) "ytdlp-desktop-selftest"
+    if (-not (Test-Path -LiteralPath $selftestDir)) {
+        New-Item -ItemType Directory -Force -Path $selftestDir | Out-Null
+    }
+
+    Write-Host "  CWD: $selftestDir" -NoNewline
+    Push-Location $selftestDir
+    $env:YTDLP_DESKTOP_SELFTEST = "1"
+    try {
+        $proc = Start-Process -FilePath $AppExe -PassThru -Wait
+        $code = $proc.ExitCode
+        if ($code -ne 0) {
+            throw "Packaged self-test failed: '$AppExe' exited with code $code"
+        }
+    } finally {
+        Remove-Item Env:YTDLP_DESKTOP_SELFTEST -ErrorAction SilentlyContinue
+        Pop-Location
+        Stop-LockedProcesses -TargetDir $Release
+    }
+    Write-Host " selftest exit=$code [ok]"
+}
+
+function Assert-BundledBinariesRun {
+    # Exercise the *packaged* copies, never the source tree.
+    $ytDlp = Join-Path $Release "bin\yt-dlp.exe"
+    $ytDlpVersion = & $ytDlp --version
+    $ytDlpCode = $LASTEXITCODE
+    Write-Host "  yt-dlp: $ytDlpVersion"
+    if ($ytDlpCode -ne 0) {
+        throw "Packaged yt-dlp.exe --version failed with exit code $ytDlpCode"
+    }
+
+    $ffmpeg = Join-Path $Release "bin\ffmpeg.exe"
+    $ffmpegBanner = & $ffmpeg -version 2>&1
+    $ffmpegCode = $LASTEXITCODE
+    Write-Host "  ffmpeg: $($ffmpegBanner | Select-Object -First 1)"
+    if ($ffmpegCode -ne 0) {
+        throw "Packaged ffmpeg.exe -version failed with exit code $ffmpegCode"
+    }
+}
+
 # Stop any old running release instances before starting
 Stop-LockedProcesses -TargetDir $Release
 
-# Fast pre-flight check
 Check-Prerequisites
 
 if (-not $SkipTests) {
@@ -143,75 +259,37 @@ Invoke-Step "Generating application icon" {
     python $IconScript
 }
 
-Invoke-Step "Publishing native launcher (.NET 4.8 WinExe)" {
-    dotnet publish $LauncherProj -c Release -o $LaunchOut
-}
-
-Invoke-Step "Building PyInstaller onedir core" {
-    python -m PyInstaller --noconfirm --clean $SpecFile --distpath $DistDir --workpath (Join-Path $Root "build\pyinstaller")
+Invoke-Step "Building PyInstaller onedir application" {
+    Safe-RemoveDirectory -Path $DistDir
+    python -m PyInstaller --noconfirm --clean $SpecFile --distpath $DistDir --workpath $WorkDir
 }
 
 Invoke-Step "Assembling Release layout" {
+    if (-not (Test-Path -LiteralPath $StageDir)) {
+        throw "PyInstaller did not produce the expected onedir bundle: $StageDir"
+    }
     Safe-RemoveDirectory -Path $Release
-    New-Item -ItemType Directory -Force -Path $AppDir, "$AppDir\bin", "$AppDir\assets" | Out-Null
-
-    Copy-Item (Join-Path $DistCore "YTDownloaderCore.exe") $AppDir
-    Copy-Item (Join-Path $DistCore "_internal") "$AppDir\_internal" -Recurse -Force
-
-    foreach ($exe in $BinExes) {
-        Copy-Item (Join-Path $Root "bin\$exe") "$AppDir\bin\$exe"
-    }
-    if (Test-Path (Join-Path $Root "assets\fonts")) {
-        Copy-Item (Join-Path $Root "assets\fonts") "$AppDir\assets\fonts" -Recurse -Force
-    }
-
-    $builtIcon = Join-Path $Root "build_assets\build\logo.ico"
-    if (Test-Path $builtIcon) {
-        Copy-Item $builtIcon "$AppDir\assets\logo.ico"
-        Copy-Item $builtIcon (Join-Path $Root "assets\logo.ico") -Force
-    }
-
-    Copy-Item (Join-Path $LaunchOut "YT Downloader.exe") $Release
-    if (Test-Path (Join-Path $LaunchOut "YT Downloader.exe.config")) {
-        Copy-Item (Join-Path $LaunchOut "YT Downloader.exe.config") $Release
-    }
+    New-Item -ItemType Directory -Force -Path $Release | Out-Null
+    Copy-FrozenBundle
+    Copy-ApplicationResources
 }
 
-Invoke-Step "Validating bundle" {
-    $required = @(
-        "$Release\YT Downloader.exe",
-        "$AppDir\YTDownloaderCore.exe",
-        "$AppDir\_internal\base_library.zip",
-        "$AppDir\bin\yt-dlp.exe",
-        "$AppDir\bin\ffmpeg.exe",
-        "$AppDir\bin\ffprobe.exe",
-        "$AppDir\bin\node.exe",
-        "$AppDir\assets\logo.ico"
-    )
-    foreach ($f in $required) {
-        if (-not (Test-Path $f)) { throw "Missing required file: $f" }
-        Write-Host ("  [ok] {0} ({1:N0} KB)" -f (Split-Path $f -Leaf), ((Get-Item $f).Length / 1KB))
-    }
+Invoke-Step "Validating package layout" {
+    Assert-RequiredPackageFiles
+    Assert-ResourceDirsBesideExecutable
+    Assert-NoLauncherArtifacts
+    Write-Host "  [ok] $AppExe"
+    Write-Host "  [ok] $Release\bin (yt-dlp, ffmpeg, ffprobe, node)"
+    Write-Host "  [ok] $Release\assets (logo.ico)"
+    Write-Host "  [ok] $Release\_internal (base_library.zip)"
+}
 
-    Write-Host "  Running packaged selftest through the launcher (arbitrary CWD)..." -NoNewline
-    $validateDir = Join-Path $env:TEMP "ytdlp-desktop-validate"
-    New-Item -ItemType Directory -Force -Path $validateDir | Out-Null
-    Push-Location $validateDir
-    $env:YTDLP_DESKTOP_SELFTEST = "1"
-    try {
-        $p = Start-Process -FilePath "$Release\YT Downloader.exe" -PassThru -Wait
-        if ($p.ExitCode -ne 0) { throw "Selftest exit code was $($p.ExitCode)" }
-        Write-Host " exit=$($p.ExitCode)"
-    }
-    finally {
-        Remove-Item Env:YTDLP_DESKTOP_SELFTEST -ErrorAction SilentlyContinue
-        Pop-Location
-        Stop-LockedProcesses -TargetDir $Release
-    }
+Invoke-Step "Running packaged self-test from an arbitrary working directory" {
+    Invoke-PackagedSelfTest
+}
 
-    Write-Host "  Binaries from the packaged bin\:" 
-    & "$AppDir\bin\yt-dlp.exe" --version
-    (& "$AppDir\bin\ffmpeg.exe" -version 2>&1) | Select-Object -First 1
+Invoke-Step "Smoke-testing bundled binaries from the package" {
+    Assert-BundledBinariesRun
 }
 
 if (-not $BuildWork) {
@@ -223,4 +301,4 @@ if (-not $BuildWork) {
 Write-Host ""
 Write-Host "Release ready:" -ForegroundColor Green
 Write-Host "  $Release" -ForegroundColor Green
-Write-Host "  Run the app from:  $Release\YT Downloader.exe" -ForegroundColor Green
+Write-Host "  Run the app from:  $AppExe" -ForegroundColor Green

@@ -1,15 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller onedir spec for the YTDownloaderCore payload.
+"""PyInstaller onedir spec for the YT Downloader application.
 
-Layout produced by the build pipeline (see build_windows.ps1)::
+``app.py`` is frozen directly into the single release executable — there is no
+outer launcher. The build pipeline (see build_windows.ps1) flattens the bundle
+PyInstaller generates into ``dist\\YT Downloader`` into the final layout::
 
-    Release\\YT Downloader\\YTDownloaderCore.exe   <- this bundle root
-    Release\\YT Downloader\\_internal\\           <- Python run-time, modules
-    Release\\YT Downloader\\bin\\                 <- yt-dlp/ffmpeg/ffprobe/node (copied by script)
-    Release\\YT Downloader\\assets\\              <- icon/fonts (copied by script)
+    Release\\YT Downloader.exe   <- this bundle root, the real application
+    Release\\_internal\\         <- Python run-time, libraries, base_library.zip
+    Release\\bin\\               <- yt-dlp/ffmpeg/ffprobe/node (copied by script)
+    Release\\assets\\            <- icon/fonts (copied by script)
 
-Resources live *next to* the executable (resolved by utils/paths.app_root),
-never inside ``_internal``, so relocation keeps working.
+``bin`` and ``assets`` deliberately stay *next to* the executable rather than
+inside ``_internal``: ``utils.paths.app_root()`` resolves them from the
+executable's own directory, so the whole Release folder stays relocatable.
 """
 
 import os
@@ -53,7 +56,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="YTDownloaderCore",
+    name="YT Downloader",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -71,5 +74,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="YTDownloaderCore",
+    name="YT Downloader",
 )

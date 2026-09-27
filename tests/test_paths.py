@@ -13,7 +13,7 @@ def test_app_root_points_at_project_root():
 
 
 def _freeze(paths_mod, exe_dir):
-    paths_mod.sys = SimpleNamespace(frozen=True, executable=str(exe_dir / "YTDownloaderCore.exe"))
+    paths_mod.sys = SimpleNamespace(frozen=True, executable=str(exe_dir / "YT Downloader.exe"))
 
 
 def test_app_root_uses_executable_dir_when_frozen(monkeypatch, tmp_path):

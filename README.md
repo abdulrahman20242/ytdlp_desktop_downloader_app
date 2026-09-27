@@ -4,7 +4,7 @@ A modern, portable Windows desktop application for downloading YouTube videos, a
 
 [![Release](https://img.shields.io/github/v/release/abdulrahman20242/ytdlp_desktop_downloader_app?color=green&label=Latest%20Release)](https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app/releases/latest)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-blue)](#requirements)
-[![Tests](https://img.shields.io/badge/Tests-333%20passed-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-491%20passed-brightgreen)](#testing)
 
 ---
 
@@ -12,17 +12,19 @@ A modern, portable Windows desktop application for downloading YouTube videos, a
 
 **No Python or command line setup required!** You can download the pre-compiled, fully portable bundle:
 
-📦 **[Download YT Downloader v1.0.0 (Portable ZIP)](https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app/releases/download/v1.0.0/YTDownloader-v1.0.0-windows-x64.zip)** (~174 MB)
+📦 **[Download YT Downloader v1.0.0 (Portable ZIP)](https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app/releases/download/v1.0.0/YTDownloader-v1.0.0-windows-x64.zip)** (164 MB)
 
 1. Download and extract **`YTDownloader-v1.0.0-windows-x64.zip`** to any folder.
-2. Double-click **`YT Downloader.exe`** to start.
+2. Open the extracted **`YTDownloader-v1.0.0-windows-x64\YT Downloader\`** folder and double-click **`YT Downloader.exe`**.
 3. All dependencies (`yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`, `node.exe`) are bundled and ready out-of-the-box.
+
+> This ZIP is the published v1.0.0 artifact and still ships the older nested layout (`YT Downloader\` with a separate launcher `.exe` inside). Builds from the current source produce the flat layout documented under [Building a Portable Release](#building-a-portable-release).
 
 ---
 
 ## Overview
 
-YT Downloader provides a clean graphical interface for downloading YouTube content. It runs `yt-dlp` as a subprocess for downloads and uses the Python `yt_dlp` API only for extracting video metadata. The UI is built with `customtkinter` with full Arabic and English support.
+YT Downloader provides a clean graphical interface for downloading YouTube content. It runs `yt-dlp` as a subprocess for downloads and uses the Python `yt_dlp` API only for extracting video metadata. The UI is built with `customtkinter` and is Arabic-only (there is no language setting).
 
 ## Features
 
@@ -39,9 +41,9 @@ YT Downloader provides a clean graphical interface for downloading YouTube conte
 - **Process-tree cancellation** — cleanly terminates download subprocesses and worker trees without leaving orphan processes
 - **Resilient configuration** — automatic schema validation, legacy path sanitization, and fallback recovery
 - **Logs panel** — collapsible log viewer with debug information
-- **Startup dependency check** — validates bundled binaries (yt-dlp, FFmpeg, FFprobe, Node.js) at launch
+- **Startup dependency check** — validates the bundled binaries (yt-dlp, FFmpeg, FFprobe, Node.js) plus the `yt_dlp` Python package, and warns if the executable and package versions differ
 - **Settings dialog** — configure theme, download defaults, cookies, and advanced options
-- **Dark / Light theme** — switchable from settings with system accent integration
+- **Dark / Light / System theme** — switchable from the General tab of the settings dialog (`ui.theme`)
 
 ## Requirements
 
@@ -104,7 +106,7 @@ Then place the required binaries (`yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`) in 
 ## Usage
 
 1. Run `python app.py`
-2. The startup check validates your dependencies. Click **Continue** when ready.
+2. The startup check validates your dependencies. Click **متابعة** (Continue) when ready.
 3. Paste a YouTube URL into the input field.
 4. Click **Fetch** to load video information (title, thumbnail, available qualities, duration, channel).
 5. Select a download mode (**video**, **mp4_only**, or **audio**) and a quality level.
@@ -237,10 +239,10 @@ Downloads run `bin/yt-dlp.exe` as a subprocess and parse its stdout line-by-line
 │   ├── paths.py               # App/UserData/Bin directory resolution
 │   ├── validators.py          # YouTube URL validation
 │   └── file_utils.py          # File/folder helpers
-├── assets/                    # Static assets (fonts)
+├── assets/                    # Static assets (logo.ico, fonts)
 ├── bin/                       # Binaries (not in Git)
 ├── tests/                     # Test suite
-├── docx/                      # Design documents (PRD, reference)
+├── docs/                      # Design documents (PRD, reference)
 ├── FAQ.md                     # Frequently asked questions
 ├── requirements.txt           # Python dependencies
 └── README.md
@@ -272,13 +274,26 @@ python app.py
 .\build_windows.bat
 ```
 
-The build compiles the launcher (`dotnet publish`), freezes the app with
-PyInstaller (`ytdownloader.spec`), assembles `Release\YT Downloader.exe` +
-`Release\YT Downloader\...` (launcher, `_internal\`, `assets\`, `bin\`), then
-runs a packaged self-test via `YTDLP_DESKTOP_SELFTEST=1` before reporting a
-summary. User data (config, cookies) always lives under `%APPDATA%\YTDownloader\`,
-never inside the install folder, so the release is portable and upgradeable
-in place.
+`build_windows.bat` forwards all arguments to `build_windows.ps1`: pass `-SkipTests` to skip the pytest run, or `-BuildWork` to keep the intermediate `dist\` and `build\` directories.
+
+The build freezes `app.py` directly with PyInstaller (`ytdownloader.spec`,
+`--onedir --noconsole`) and assembles the portable layout under `Release\`:
+
+```
+Release\
+├── YT Downloader.exe     <- the PyInstaller application itself
+├── _internal\            <- frozen Python run-time and libraries
+├── bin\                  <- yt-dlp.exe, ffmpeg.exe, ffprobe.exe, node.exe
+└── assets\               <- logo.ico, fonts\
+```
+
+`bin\` and `assets\` sit beside the executable (not inside `_internal\`) because
+the app resolves them relative to the executable's own directory, so the folder
+can be moved as a unit. The build then runs a packaged self-test via
+`YTDLP_DESKTOP_SELFTEST=1` from an unrelated working directory and smoke-tests
+the packaged `yt-dlp.exe`/`ffmpeg.exe` before reporting a summary. User data
+(config, cookies) always lives under `%APPDATA%\YTDownloader\`, never inside the
+install folder, so the release is portable and upgradeable in place.
 
 ### Testing
 
@@ -286,7 +301,7 @@ in place.
 pytest -q
 ```
 
-The test suite covers `core/`, `utils/`, and `ui/` modules with stubs for `customtkinter`, `tkinter`, and `yt_dlp`.
+The test suite covers `app.py` and the `core/`, `ui/`, and `utils/` modules with stubs for `customtkinter`, `tkinter`, and `yt_dlp`.
 
 ## Troubleshooting
 
@@ -304,7 +319,7 @@ This is YouTube throttling. The application automatically detects and recovers f
 
 ### Startup check shows missing dependencies
 
-The application checks for FFmpeg, FFprobe, Node.js (optional), and yt-dlp at launch. Place the required binaries in the `bin/` directory and install the Python package (`pip install -r requirements.txt`).
+At launch the app checks FFmpeg, FFprobe, the bundled `yt-dlp.exe`, and the `yt_dlp` Python package, plus Node.js (optional); it also warns when the bundled executable and the Python package report different versions. Place the required binaries in the `bin/` directory and install the Python package (`pip install -r requirements.txt`).
 
 ### "invalid command name" console errors
 
@@ -321,4 +336,4 @@ Report issues at <https://github.com/abdulrahman20242/ytdlp_desktop_downloader_a
 ## Additional Documentation
 
 - [FAQ.md](FAQ.md) — frequently asked questions about architecture, behavior, and setup
-- `docx/` — design documents (PRD, project reference, implementation diff)
+- `docs/` — design documents (PRD, project reference, implementation diff)

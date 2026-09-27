@@ -6,7 +6,7 @@ import tkinter as tk
 
 # Resolve application paths from the executable location *before* importing
 # anything else. In the frozen onedir build the resources live beside
-# YTDownloaderCore.exe (never inside _internal), in a source checkout they
+# "YT Downloader.exe" (never inside _internal), in a source checkout they
 # live at the project root.
 from utils.paths import assets_dir, bin_dir
 

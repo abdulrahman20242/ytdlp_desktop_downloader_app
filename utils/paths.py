@@ -25,7 +25,7 @@ def app_root() -> Path:
     """Directory that holds the application's resources.
 
     Source checkout: the project root (parent of ``utils/``).
-    Frozen onedir build: the folder containing ``YTDownloaderCore.exe``.
+    Frozen onedir build: the folder containing ``YT Downloader.exe``.
     """
     if is_frozen():
         return Path(sys.executable).resolve().parent
