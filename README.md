@@ -12,13 +12,11 @@ A modern, portable Windows desktop application for downloading YouTube videos, a
 
 **No Python or command line setup required!** You can download the pre-compiled, fully portable bundle:
 
-📦 **[Download YT Downloader v1.0.0 (Portable ZIP)](https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app/releases/download/v1.0.0/YTDownloader-v1.0.0-windows-x64.zip)** (164 MB)
+📦 **[Download YT Downloader v1.0.0 (Portable ZIP)](https://github.com/abdulrahman20242/ytdlp_desktop_downloader_app/releases/download/v1.0.0/YTDownloader-v1.0.0-windows-x64.zip)** (~171 MB)
 
 1. Download and extract **`YTDownloader-v1.0.0-windows-x64.zip`** to any folder.
-2. Open the extracted **`YTDownloader-v1.0.0-windows-x64\YT Downloader\`** folder and double-click **`YT Downloader.exe`**.
+2. Open the extracted **`YTDownloader-v1.0.0-windows-x64`** folder and double-click **`YT Downloader.exe`**.
 3. All dependencies (`yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`, `node.exe`) are bundled and ready out-of-the-box.
-
-> This ZIP is the published v1.0.0 artifact and still ships the older nested layout (`YT Downloader\` with a separate launcher `.exe` inside). Builds from the current source produce the flat layout documented under [Building a Portable Release](#building-a-portable-release).
 
 ---
 
